@@ -1,0 +1,455 @@
+{
+  "name": "claude-plugin-manager",
+  "displayName": "Claude Plugin Manager",
+  "description": "Toggle Claude Code plugins, read skill descriptions, discover trending skills, and track free AI offers from the VS Code sidebar.",
+  "version": "0.9.0",
+  "publisher": "local",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "cpm",
+          "title": "Claude 플러그인",
+          "icon": "media/icon.svg"
+        },
+        {
+          "id": "cpmFree",
+          "title": "무료 AI 혜택",
+          "icon": "media/free.svg"
+        }
+      ]
+    },
+    "views": {
+      "cpm": [
+        {
+          "id": "cpm.installed",
+          "name": "설치된 플러그인"
+        },
+        {
+          "id": "cpm.recommend",
+          "name": "추천 스킬"
+        }
+      ],
+      "cpmFree": [
+        {
+          "id": "cpm.free",
+          "name": "무료 AI 혜택"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "cpm.refresh",
+        "title": "새로고침",
+        "category": "Claude Plugins",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "cpm.quickToggle",
+        "title": "플러그인 켜기/끄기",
+        "category": "Claude Plugins",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "cpm.enableAll",
+        "title": "모두 켜기",
+        "category": "Claude Plugins"
+      },
+      {
+        "command": "cpm.disableAll",
+        "title": "모두 끄기",
+        "category": "Claude Plugins"
+      },
+      {
+        "command": "cpm.openReadme",
+        "title": "README 보기",
+        "category": "Claude Plugins",
+        "icon": "$(book)"
+      },
+      {
+        "command": "cpm.openHomepage",
+        "title": "홈페이지 열기",
+        "category": "Claude Plugins",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "cpm.revealFolder",
+        "title": "설치 폴더 열기",
+        "category": "Claude Plugins"
+      },
+      {
+        "command": "cpm.update",
+        "title": "업데이트",
+        "category": "Claude Plugins",
+        "icon": "$(arrow-circle-up)"
+      },
+      {
+        "command": "cpm.uninstall",
+        "title": "제거",
+        "category": "Claude Plugins"
+      },
+      {
+        "command": "cpm.rec.refresh",
+        "title": "추천 새로 수집 (GitHub)",
+        "category": "Claude Plugins",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "cpm.rec.install",
+        "title": "설치",
+        "category": "Claude Plugins",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "cpm.rec.open",
+        "title": "GitHub에서 보기",
+        "category": "Claude Plugins",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "cpm.showOutput",
+        "title": "CLI 출력 보기",
+        "category": "Claude Plugins",
+        "icon": "$(output)"
+      },
+      {
+        "command": "cpm.translate",
+        "title": "빠진 한글 설명 번역 (무료 번역기)",
+        "category": "Claude Plugins",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "cpm.editKorean",
+        "title": "한글 설명 직접 수정",
+        "category": "Claude Plugins"
+      },
+      {
+        "command": "cpm.updateAll",
+        "title": "모두 업데이트",
+        "category": "Claude Plugins",
+        "icon": "$(arrow-circle-up)"
+      },
+      {
+        "command": "cpm.checkUpdates",
+        "title": "업데이트 확인",
+        "category": "Claude Plugins",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "cpm.dedupe",
+        "title": "중복 플러그인 정리",
+        "category": "Claude Plugins",
+        "icon": "$(warning)"
+      },
+      {
+        "command": "cpm.free.refresh",
+        "title": "무료 혜택 새로 수집",
+        "category": "Free AI",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "cpm.free.guide",
+        "title": "사용법 보기",
+        "category": "Free AI",
+        "icon": "$(book)"
+      },
+      {
+        "command": "cpm.free.open",
+        "title": "사이트 열기",
+        "category": "Free AI",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "cpm.free.copy",
+        "title": "모델 ID / Base URL 복사",
+        "category": "Free AI",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "cpm.free.addLink",
+        "title": "링크로 혜택 추가",
+        "category": "Free AI",
+        "icon": "$(add)"
+      },
+      {
+        "command": "cpm.free.removeCustom",
+        "title": "목록에서 삭제",
+        "category": "Free AI",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "cpm.usage.analyze",
+        "title": "플러그인 사용량 분석",
+        "category": "Claude Plugins",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "cpm.usage.cleanup",
+        "title": "안 쓰는 플러그인 정리",
+        "category": "Claude Plugins",
+        "icon": "$(trash)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "cpm.quickToggle",
+          "when": "view == cpm.installed",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cpm.refresh",
+          "when": "view == cpm.installed",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cpm.enableAll",
+          "when": "view == cpm.installed",
+          "group": "more@1"
+        },
+        {
+          "command": "cpm.disableAll",
+          "when": "view == cpm.installed",
+          "group": "more@2"
+        },
+        {
+          "command": "cpm.showOutput",
+          "when": "view == cpm.installed",
+          "group": "more@3"
+        },
+        {
+          "command": "cpm.rec.refresh",
+          "when": "view == cpm.recommend",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cpm.translate",
+          "when": "view == cpm.installed",
+          "group": "more@4"
+        },
+        {
+          "command": "cpm.editKorean",
+          "when": "view == cpm.installed",
+          "group": "more@5"
+        },
+        {
+          "command": "cpm.checkUpdates",
+          "when": "view == cpm.installed",
+          "group": "navigation@3"
+        },
+        {
+          "command": "cpm.dedupe",
+          "when": "view == cpm.installed",
+          "group": "more@6"
+        },
+        {
+          "command": "cpm.free.refresh",
+          "when": "view == cpm.free",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cpm.free.addLink",
+          "when": "view == cpm.free",
+          "group": "navigation@0"
+        },
+        {
+          "command": "cpm.usage.analyze",
+          "when": "view == cpm.installed",
+          "group": "more@7"
+        },
+        {
+          "command": "cpm.usage.cleanup",
+          "when": "view == cpm.installed",
+          "group": "more@8"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cpm.openReadme",
+          "when": "view == cpm.installed && viewItem =~ /^plugin/",
+          "group": "inline@1"
+        },
+        {
+          "command": "cpm.openHomepage",
+          "when": "view == cpm.installed && viewItem =~ /^plugin.*.web/",
+          "group": "inline@2"
+        },
+        {
+          "command": "cpm.openReadme",
+          "when": "view == cpm.installed && viewItem =~ /^plugin/",
+          "group": "1_open@1"
+        },
+        {
+          "command": "cpm.openHomepage",
+          "when": "view == cpm.installed && viewItem =~ /^plugin.*.web/",
+          "group": "1_open@2"
+        },
+        {
+          "command": "cpm.revealFolder",
+          "when": "view == cpm.installed && viewItem =~ /^plugin/",
+          "group": "1_open@3"
+        },
+        {
+          "command": "cpm.update",
+          "when": "view == cpm.installed && viewItem =~ /^plugin/",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "cpm.uninstall",
+          "when": "view == cpm.installed && viewItem =~ /^plugin/",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "cpm.rec.install",
+          "when": "view == cpm.recommend && viewItem =~ /^rec\\.(market|github\\.installable)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "cpm.rec.open",
+          "when": "view == cpm.recommend && viewItem =~ /^rec\\.github/",
+          "group": "inline@2"
+        },
+        {
+          "command": "cpm.update",
+          "when": "view == cpm.installed && viewItem =~ /.upd/",
+          "group": "inline@0"
+        },
+        {
+          "command": "cpm.free.copy",
+          "when": "view == cpm.free && viewItem =~ /^free.(model|provider)$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "cpm.free.open",
+          "when": "view == cpm.free && viewItem =~ /^free./",
+          "group": "inline@2"
+        },
+        {
+          "command": "cpm.free.guide",
+          "when": "view == cpm.free && viewItem =~ /^free.(model|provider)$/",
+          "group": "1@1"
+        },
+        {
+          "command": "cpm.free.removeCustom",
+          "when": "view == cpm.free && viewItem == free.custom",
+          "group": "inline@3"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "cpm.openReadme",
+          "when": "false"
+        },
+        {
+          "command": "cpm.openHomepage",
+          "when": "false"
+        },
+        {
+          "command": "cpm.revealFolder",
+          "when": "false"
+        },
+        {
+          "command": "cpm.update",
+          "when": "false"
+        },
+        {
+          "command": "cpm.uninstall",
+          "when": "false"
+        },
+        {
+          "command": "cpm.rec.install",
+          "when": "false"
+        },
+        {
+          "command": "cpm.rec.open",
+          "when": "false"
+        },
+        {
+          "command": "cpm.free.guide",
+          "when": "false"
+        },
+        {
+          "command": "cpm.free.open",
+          "when": "false"
+        },
+        {
+          "command": "cpm.free.copy",
+          "when": "false"
+        },
+        {
+          "command": "cpm.free.removeCustom",
+          "when": "false"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Claude Plugin Manager",
+      "properties": {
+        "claudePluginManager.claudePath": {
+          "type": "string",
+          "default": "",
+          "description": "Claude CLI 실행 파일 경로. 비워 두면 VS Code Claude Code 확장에 포함된 CLI를 자동으로 찾습니다."
+        },
+        "claudePluginManager.githubToken": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub 토큰(선택). 권한 없는 토큰이면 충분하며, 추천 수집 시 API 호출 한도를 늘려 줍니다."
+        },
+        "claudePluginManager.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "하단 상태바에 켜진 플러그인 수를 표시합니다."
+        },
+        "claudePluginManager.koreanDescriptions": {
+          "type": "boolean",
+          "default": true,
+          "description": "플러그인·스킬 설명을 한글로 표시합니다. 끄면 원문(영어)을 표시합니다."
+        },
+        "claudePluginManager.promoFeeds": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "url"
+            ]
+          },
+          "description": "무료 공지를 찾을 RSS/Atom 피드를 추가합니다. 예: [{\"name\": \"OpenAI\", \"url\": \"https://openai.com/news/rss.xml\"}]. Vercel·GitHub 변경 기록은 기본 포함."
+        },
+        "claudePluginManager.unusedDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 7,
+          "description": "이 기간(일) 동안 한 번도 쓰지 않은 플러그인을 정리 대상으로 알립니다."
+        },
+        "claudePluginManager.unusedGraceDays": {
+          "type": "number",
+          "default": 14,
+          "minimum": 0,
+          "description": "설치 후 이 기간(일)이 지나기 전에는 미사용 알림을 띄우지 않습니다."
+        }
+      }
+    }
+  }
+}
