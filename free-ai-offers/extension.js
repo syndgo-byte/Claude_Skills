@@ -1,20 +1,31 @@
 'use strict';
-// "무료 AI" sidebar: free AI offers, when they end, and how to use them.
+// "무료 AI 혜택" sidebar: free AI offers, when they end, and how to use them. No Claude tokens used.
 const vscode = require('vscode');
 const fs = require('fs');
 const path = require('path');
 const freeai = require('./lib/freeai');
 const i18n = require('./lib/i18n');
 
-const CACHE_KEY = 'cpm.freeai';
-const SEEN_KEY = 'cpm.freeai.seen';
-const CUSTOM_KEY = 'cpm.freeai.custom';
+const CACHE_KEY = 'fai.data';
+const SEEN_KEY = 'fai.seen';
+const CUSTOM_KEY = 'fai.custom';
+const SEEDED_KEY = 'fai.seededLinks';
 const TTL_MS = 6 * 60 * 60 * 1000;
 const NEW_MODEL_DAYS = 14;
+const CUSTOM_GRACE_DAYS = 7; // keep an expired custom link visible this long, then drop it
+const CUSTOM_MAX = 60; // safety cap so the list can't grow forever even without deadlines
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
+function config() {
+  return vscode.workspace.getConfiguration('freeAiOffers');
+}
+
+function korean() {
+  return config().get('koreanDescriptions') !== false;
+}
+
 function ko(key, original) {
-  return i18n.lookup(key) || original || '';
+  return (korean() && i18n.lookup(key)) || original || '';
 }
 
 function short(text, max) {
@@ -56,6 +67,23 @@ class FreeAIProvider {
     this.redraw();
   }
 
+  // Drops custom links whose deadline is well past, and caps the list so it can't grow forever.
+  pruneCustom() {
+    const cutoff = Date.now() - CUSTOM_GRACE_DAYS * 86400000;
+    const before = this.custom.length;
+    this.custom = this.custom.filter((c) => !c.deadline || Date.parse(`${c.deadline}T00:00:00Z`) >= cutoff);
+    if (this.custom.length > CUSTOM_MAX) this.custom.length = CUSTOM_MAX;
+    return before - this.custom.length;
+  }
+
+  // Keeps the "already seen" id set from growing forever: an id only needs to stay in it while
+  // the item it names is still in the current dataset (so it doesn't get re-flagged as NEW).
+  pruneSeen(currentIds) {
+    const before = this.seen.size;
+    this.seen = new Set([...this.seen].filter((id) => currentIds.has(id)));
+    return before - this.seen.size;
+  }
+
   isNewModel(m) {
     return Date.now() - m.created < NEW_MODEL_DAYS * 86400000;
   }
@@ -68,8 +96,8 @@ class FreeAIProvider {
     let added = [];
     try {
       const data = await vscode.window.withProgress(
-        { location: { viewId: 'cpm.free' }, title: '무료 AI 혜택 수집 중' },
-        () => freeai.collect(vscode.workspace.getConfiguration('claudePluginManager').get('promoFeeds')));
+        { location: { viewId: 'fai.list' }, title: '무료 AI 혜택 수집 중' },
+        () => freeai.collect(config().get('promoFeeds')));
       const firstRun = !this.seen.size;
       // News arrived in a later version; the first batch only seeds the seen list.
       const hadPromos = !!(this.data && this.data.watched);
@@ -79,7 +107,9 @@ class FreeAIProvider {
       added = firstRun ? [] : items.filter((x) => !this.seen.has(x.id) && (hadPromos || x.kind !== 'news'));
       this.fresh = new Set(added.map((x) => x.id));
       for (const x of items) this.seen.add(x.id);
+      this.pruneSeen(new Set(items.map((x) => x.id)));
       await this.context.globalState.update(SEEN_KEY, [...this.seen]);
+      if (this.pruneCustom()) await this.saveCustom();
     } finally {
       this.loading = false;
       this.redraw();
@@ -153,7 +183,7 @@ class FreeAIProvider {
     info.tooltip = md(`출처: [Free-LLM 목록](${freeai.DIRECTORY_PAGE}) · [OpenRouter](https://openrouter.ai/models?max_price=0)`
       + ' · [Vercel AI Gateway](https://vercel.com/ai-gateway/models) · [Vercel 변경 기록](https://vercel.com/changelog)'
       + ' · [GitHub 변경 기록](https://github.blog/changelog/) · Google 뉴스 · [Hacker News](https://news.ycombinator.com)'
-      + '\n\n6시간마다 자동 갱신. Claude 토큰을 쓰지 않습니다. 공지 피드는 설정 `claudePluginManager.promoFeeds`에 더 넣을 수 있습니다.');
+      + '\n\n6시간마다 자동 갱신. Claude 토큰을 쓰지 않습니다. 공지 피드는 설정 `freeAiOffers.promoFeeds`에 더 넣을 수 있습니다.');
     sections.push(info);
     for (const e of d.errors) {
       const it = new vscode.TreeItem(e);
@@ -187,7 +217,7 @@ class FreeAIProvider {
       '',
       '클릭하면 사용법 안내가 열립니다.',
     ].join('\n'));
-    it.command = { command: 'cpm.free.guide', title: '사용법', arguments: [it] };
+    it.command = { command: 'fai.guide', title: '사용법', arguments: [it] };
     return it;
   }
 
@@ -211,7 +241,7 @@ class FreeAIProvider {
       '',
       '클릭하면 사용법 안내가 열립니다.',
     ].filter((l) => l !== null).join('\n'));
-    it.command = { command: 'cpm.free.guide', title: '사용법', arguments: [it] };
+    it.command = { command: 'fai.guide', title: '사용법', arguments: [it] };
     return it;
   }
 
@@ -223,7 +253,7 @@ class FreeAIProvider {
     it.description = `${this.newTag(n.id)}${days !== null ? `D-${days} · ${n.deadline}까지 · ` : ''}${n.source} · ${n.date.slice(5, 10)}`;
     it.iconPath = new vscode.ThemeIcon(days !== null ? 'watch' : 'megaphone',
       days !== null && days <= 3 ? new vscode.ThemeColor('charts.red') : this.fresh.has(n.id) ? new vscode.ThemeColor('charts.green') : undefined);
-    it.tooltip = md(`**${n.name}**${n.lang === 'en' && i18n.lookup(`news:${n.id}`) ? `\n\n${i18n.lookup(`news:${n.id}`)}` : ''}`
+    it.tooltip = md(`**${n.name}**${n.lang === 'en' && ko(`news:${n.id}`, '') ? `\n\n${ko(`news:${n.id}`, '')}` : ''}`
       + `${n.summary ? `\n\n> ${ko(`newss:${n.id}`, n.summary)}` : ''}`
       + `\n\n${n.source} · ${n.date.slice(0, 10)}${n.deadline ? `\n\n$(watch) 마감 ${n.deadline} (제목에서 추출, 원문 확인 필요)` : ''}`);
     it.command = { command: 'vscode.open', title: '열기', arguments: [vscode.Uri.parse(n.url)] };
@@ -249,7 +279,7 @@ class FreeAIProvider {
     it.contextValue = 'free.news';
     it.description = `▲${n.points} · ${n.date.slice(0, 10)}`;
     it.iconPath = new vscode.ThemeIcon('megaphone');
-    it.tooltip = md(`**${n.name}**\n\n${i18n.lookup(`news:${n.id}`) || ''}\n\n▲${n.points} · 댓글 ${n.comments} · ${n.date.slice(0, 10)}`);
+    it.tooltip = md(`**${n.name}**\n\n${ko(`news:${n.id}`, '')}\n\n▲${n.points} · 댓글 ${n.comments} · ${n.date.slice(0, 10)}`);
     it.command = { command: 'vscode.open', title: '열기', arguments: [vscode.Uri.parse(n.url)] };
     return it;
   }
@@ -432,12 +462,17 @@ async function openGuide(context, item, data) {
   await vscode.commands.executeCommand('markdown.showPreview', vscode.Uri.file(file));
 }
 
-// ---------- Registration ----------
+// ---------- Activation ----------
 
-function register(context, translate) {
+function activate(context) {
   const provider = new FreeAIProvider(context);
-  const view = vscode.window.createTreeView('cpm.free', { treeDataProvider: provider, showCollapseAll: true });
-  provider.afterLoad = () => translate(provider.missingText()).then(() => provider.redraw());
+  const view = vscode.window.createTreeView('fai.list', { treeDataProvider: provider, showCollapseAll: true });
+  provider.afterLoad = () => {
+    if (!korean()) return;
+    const entries = provider.missingText();
+    if (!Object.keys(entries).length) return;
+    i18n.translate(entries).then(() => provider.redraw());
+  };
 
   const run = async (force, notify) => {
     const added = await provider.refresh(force);
@@ -445,13 +480,13 @@ function register(context, translate) {
     const names = added.slice(0, 4).map((x) => x.name).join(', ');
     const pick = await vscode.window.showInformationMessage(
       `새 무료 AI 혜택 ${added.length}개: ${names}${added.length > 4 ? ' 외' : ''}`, '보기');
-    if (pick) vscode.commands.executeCommand('cpm.free.focus');
+    if (pick) vscode.commands.executeCommand('fai.list.focus');
   };
 
   const reg = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
-  reg('cpm.free.refresh', () => run(true, true));
-  reg('cpm.free.guide', (item) => openGuide(context, item, provider.data));
-  reg('cpm.free.open', (item) => {
+  reg('fai.refresh', () => run(true, true));
+  reg('fai.guide', (item) => openGuide(context, item, provider.data));
+  reg('fai.open', (item) => {
     const e = item && item.entry;
     if (e && e.url) vscode.env.openExternal(vscode.Uri.parse(e.url));
   });
@@ -462,7 +497,7 @@ function register(context, translate) {
     }
     try {
       const entry = await vscode.window.withProgress(
-        { location: { viewId: 'cpm.free' }, title: '링크 읽는 중' }, () => freeai.readLink(url));
+        { location: { viewId: 'fai.list' }, title: '링크 읽는 중' }, () => freeai.readLink(url));
       provider.custom.unshift(entry);
       await provider.saveCustom();
       if (!quiet) {
@@ -474,7 +509,7 @@ function register(context, translate) {
     }
   };
 
-  reg('cpm.free.addLink', async () => {
+  reg('fai.addLink', async () => {
     let clip = '';
     try { clip = (await vscode.env.clipboard.readText()).trim(); } catch { /* no clipboard */ }
     const url = await vscode.window.showInputBox({
@@ -486,28 +521,22 @@ function register(context, translate) {
     if (url) addLink(url.trim(), false);
   });
 
-  reg('cpm.free.removeCustom', async (item) => {
+  reg('fai.removeCustom', async (item) => {
     const e = item && item.entry;
     if (!e) return;
     provider.custom = provider.custom.filter((c) => c.id !== e.id);
     await provider.saveCustom();
   });
 
-  // Posts the user shared while this feature was built, added once as examples.
-  const SEED_LINKS = [
-    'https://www.threads.com/@aicoffeechat/post/DdpYr8fkzbj',
-    'https://www.threads.com/@takepage_/post/DdgfOXOk9zb',
-  ];
-  const seeded = new Set(context.globalState.get('cpm.freeai.seededLinks') || []);
-  (async () => {
-    for (const url of SEED_LINKS.filter((u) => !seeded.has(u))) {
-      await addLink(url, true);
-      seeded.add(url);
-    }
-    context.globalState.update('cpm.freeai.seededLinks', [...seeded]);
-  })();
+  reg('fai.cleanup', async () => {
+    const removed = provider.pruneCustom();
+    if (removed) await provider.saveCustom();
+    vscode.window.showInformationMessage(removed
+      ? `마감 지난 지 ${CUSTOM_GRACE_DAYS}일 넘은 항목 ${removed}개를 지웠습니다.`
+      : '지울 항목이 없습니다. 마감된 지 오래된 항목만 자동으로 지워집니다.');
+  });
 
-  reg('cpm.free.copy', async (item) => {
+  reg('fai.copy', async (item) => {
     const e = item && item.entry;
     const text = e && (e.kind === 'model' ? e.id : e.baseUrl);
     if (!text) return;
@@ -515,12 +544,27 @@ function register(context, translate) {
     vscode.window.showInformationMessage(`복사함: ${text}`);
   });
 
+  // Posts shared while this feature was built, added once as examples.
+  const SEED_LINKS = [
+    'https://www.threads.com/@aicoffeechat/post/DdpYr8fkzbj',
+    'https://www.threads.com/@takepage_/post/DdgfOXOk9zb',
+  ];
+  const seeded = new Set(context.globalState.get(SEEDED_KEY) || []);
+  (async () => {
+    for (const url of SEED_LINKS.filter((u) => !seeded.has(u))) {
+      await addLink(url, true);
+      seeded.add(url);
+    }
+    context.globalState.update(SEEDED_KEY, [...seeded]);
+  })();
+
   // Cached data shows at once; a fresh fetch runs when older than 6 hours, then every 6 hours.
   setTimeout(() => run(false, true), 8000);
   const timer = setInterval(() => run(true, true), TTL_MS);
   context.subscriptions.push(view, { dispose: () => clearInterval(timer) });
   if (provider.data) setTimeout(() => provider.afterLoad(), 3000);
-  return provider;
 }
 
-module.exports = { register };
+function deactivate() {}
+
+module.exports = { activate, deactivate };

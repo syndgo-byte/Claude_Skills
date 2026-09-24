@@ -1,0 +1,86 @@
+{
+  "name": "free-ai-offers",
+  "displayName": "Free AI Offers",
+  "description": "Track free AI/LLM offers and their deadlines (OpenRouter, Vercel AI Gateway, vendor changelogs, news, YouTube) in a VS Code sidebar, with a usage guide per offer. Uses no Claude tokens.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "faiSidebar",
+          "title": "무료 AI 혜택",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "faiSidebar": [
+        {
+          "id": "fai.list",
+          "name": "무료 AI 혜택"
+        }
+      ]
+    },
+    "commands": [
+      { "command": "fai.refresh", "title": "무료 혜택 새로 수집", "category": "Free AI Offers", "icon": "$(sync)" },
+      { "command": "fai.guide", "title": "사용법 보기", "category": "Free AI Offers", "icon": "$(book)" },
+      { "command": "fai.open", "title": "사이트 열기", "category": "Free AI Offers", "icon": "$(link-external)" },
+      { "command": "fai.copy", "title": "모델 ID / Base URL 복사", "category": "Free AI Offers", "icon": "$(copy)" },
+      { "command": "fai.addLink", "title": "링크로 혜택 추가", "category": "Free AI Offers", "icon": "$(add)" },
+      { "command": "fai.removeCustom", "title": "목록에서 삭제", "category": "Free AI Offers", "icon": "$(trash)" },
+      { "command": "fai.cleanup", "title": "마감 지난 항목 정리", "category": "Free AI Offers", "icon": "$(clear-all)" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "fai.addLink", "when": "view == fai.list", "group": "navigation@0" },
+        { "command": "fai.refresh", "when": "view == fai.list", "group": "navigation@1" },
+        { "command": "fai.cleanup", "when": "view == fai.list", "group": "more@1" }
+      ],
+      "view/item/context": [
+        { "command": "fai.copy", "when": "view == fai.list && viewItem =~ /^free\\.(model|provider)$/", "group": "inline@1" },
+        { "command": "fai.open", "when": "view == fai.list && viewItem =~ /^free\\./", "group": "inline@2" },
+        { "command": "fai.guide", "when": "view == fai.list && viewItem =~ /^free\\.(model|provider)$/", "group": "1@1" },
+        { "command": "fai.removeCustom", "when": "view == fai.list && viewItem == free.custom", "group": "inline@3" }
+      ],
+      "commandPalette": [
+        { "command": "fai.guide", "when": "false" },
+        { "command": "fai.open", "when": "false" },
+        { "command": "fai.copy", "when": "false" },
+        { "command": "fai.removeCustom", "when": "false" }
+      ]
+    },
+    "configuration": {
+      "title": "Free AI Offers",
+      "properties": {
+        "freeAiOffers.koreanDescriptions": {
+          "type": "boolean",
+          "default": true,
+          "description": "설명을 한글로 표시합니다. 끄면 원문(영어)을 표시합니다."
+        },
+        "freeAiOffers.promoFeeds": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "object",
+            "properties": { "name": { "type": "string" }, "url": { "type": "string" } },
+            "required": ["name", "url"]
+          },
+          "description": "무료 공지를 찾을 RSS/Atom 피드를 추가합니다. 예: [{\"name\": \"OpenAI\", \"url\": \"https://openai.com/news/rss.xml\"}]. Vercel·GitHub 변경 기록은 기본 포함."
+        }
+      }
+    }
+  }
+}

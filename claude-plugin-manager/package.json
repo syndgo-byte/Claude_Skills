@@ -1,8 +1,8 @@
 {
   "name": "claude-plugin-manager",
   "displayName": "Claude Plugin Manager",
-  "description": "Toggle Claude Code plugins, read skill descriptions, discover trending skills, and track free AI offers from the VS Code sidebar.",
-  "version": "0.9.0",
+  "description": "Toggle Claude Code plugins, read skill descriptions, discover trending skills, and see which plugins you actually use.",
+  "version": "0.10.0",
   "publisher": "local",
   "license": "MIT",
   "private": true,
@@ -23,11 +23,6 @@
           "id": "cpm",
           "title": "Claude 플러그인",
           "icon": "media/icon.svg"
-        },
-        {
-          "id": "cpmFree",
-          "title": "무료 AI 혜택",
-          "icon": "media/free.svg"
         }
       ]
     },
@@ -40,12 +35,6 @@
         {
           "id": "cpm.recommend",
           "name": "추천 스킬"
-        }
-      ],
-      "cpmFree": [
-        {
-          "id": "cpm.free",
-          "name": "무료 AI 혜택"
         }
       ]
     },
@@ -154,42 +143,6 @@
         "icon": "$(warning)"
       },
       {
-        "command": "cpm.free.refresh",
-        "title": "무료 혜택 새로 수집",
-        "category": "Free AI",
-        "icon": "$(sync)"
-      },
-      {
-        "command": "cpm.free.guide",
-        "title": "사용법 보기",
-        "category": "Free AI",
-        "icon": "$(book)"
-      },
-      {
-        "command": "cpm.free.open",
-        "title": "사이트 열기",
-        "category": "Free AI",
-        "icon": "$(link-external)"
-      },
-      {
-        "command": "cpm.free.copy",
-        "title": "모델 ID / Base URL 복사",
-        "category": "Free AI",
-        "icon": "$(copy)"
-      },
-      {
-        "command": "cpm.free.addLink",
-        "title": "링크로 혜택 추가",
-        "category": "Free AI",
-        "icon": "$(add)"
-      },
-      {
-        "command": "cpm.free.removeCustom",
-        "title": "목록에서 삭제",
-        "category": "Free AI",
-        "icon": "$(trash)"
-      },
-      {
         "command": "cpm.usage.analyze",
         "title": "플러그인 사용량 분석",
         "category": "Claude Plugins",
@@ -255,16 +208,6 @@
           "group": "more@6"
         },
         {
-          "command": "cpm.free.refresh",
-          "when": "view == cpm.free",
-          "group": "navigation@1"
-        },
-        {
-          "command": "cpm.free.addLink",
-          "when": "view == cpm.free",
-          "group": "navigation@0"
-        },
-        {
           "command": "cpm.usage.analyze",
           "when": "view == cpm.installed",
           "group": "more@7"
@@ -325,26 +268,6 @@
           "command": "cpm.update",
           "when": "view == cpm.installed && viewItem =~ /.upd/",
           "group": "inline@0"
-        },
-        {
-          "command": "cpm.free.copy",
-          "when": "view == cpm.free && viewItem =~ /^free.(model|provider)$/",
-          "group": "inline@1"
-        },
-        {
-          "command": "cpm.free.open",
-          "when": "view == cpm.free && viewItem =~ /^free./",
-          "group": "inline@2"
-        },
-        {
-          "command": "cpm.free.guide",
-          "when": "view == cpm.free && viewItem =~ /^free.(model|provider)$/",
-          "group": "1@1"
-        },
-        {
-          "command": "cpm.free.removeCustom",
-          "when": "view == cpm.free && viewItem == free.custom",
-          "group": "inline@3"
         }
       ],
       "commandPalette": [
@@ -375,22 +298,6 @@
         {
           "command": "cpm.rec.open",
           "when": "false"
-        },
-        {
-          "command": "cpm.free.guide",
-          "when": "false"
-        },
-        {
-          "command": "cpm.free.open",
-          "when": "false"
-        },
-        {
-          "command": "cpm.free.copy",
-          "when": "false"
-        },
-        {
-          "command": "cpm.free.removeCustom",
-          "when": "false"
         }
       ]
     },
@@ -416,26 +323,6 @@
           "type": "boolean",
           "default": true,
           "description": "플러그인·스킬 설명을 한글로 표시합니다. 끄면 원문(영어)을 표시합니다."
-        },
-        "claudePluginManager.promoFeeds": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": {
-                "type": "string"
-              },
-              "url": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "name",
-              "url"
-            ]
-          },
-          "description": "무료 공지를 찾을 RSS/Atom 피드를 추가합니다. 예: [{\"name\": \"OpenAI\", \"url\": \"https://openai.com/news/rss.xml\"}]. Vercel·GitHub 변경 기록은 기본 포함."
         },
         "claudePluginManager.unusedDays": {
           "type": "number",

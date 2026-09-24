@@ -8,7 +8,6 @@ const rec = require('./lib/recommend');
 const i18n = require('./lib/i18n');
 const dupes = require('./lib/dupes');
 const updates = require('./lib/updates');
-const freeView = require('./freeView');
 const usage = require('./lib/usage');
 
 const CACHE_KEY = 'cpm.githubCache';
@@ -642,9 +641,6 @@ function activate(context) {
   autoTranslate(installed, null);
 
   const reg = (id, fn) => context.subscriptions.push(vscode.commands.registerCommand(id, fn));
-
-  freeView.register(context, (entries) => (korean() && Object.keys(entries).length
-    ? i18n.translate(entries) : Promise.resolve(0)));
 
   // Update check: cached result on startup, a fresh check when older than 6 hours, then every 6 hours.
   const UPDATE_KEY = 'cpm.updates';
