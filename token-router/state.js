@@ -43,8 +43,9 @@ function stats(days = 30) {
     `최근 ${days}일 판정 ${total}건`,
     ...Object.entries(routes).sort((a, b) => b[1] - a[1]).map(([r, n]) => `  ${r}: ${n}`),
     `판정 방식: ${Object.entries(by).map(([k, n]) => `${k} ${n}`).join(', ') || '-'}`,
-    `설정: 라우팅 ${st.enabled === false ? '꺼짐' : '켜짐'} · 무료 AI 판별 ${st.llm === false ? '꺼짐' : '켜짐'}`
-      + ` · Fable ${st.allowFable ? '허용' : '금지'}`,
+    `설정: 라우팅 ${st.enabled === false ? '꺼짐' : '켜짐'} · 무료 AI 판별 ${st.llm === true ? '켜짐' : '꺼짐'}`
+      + ` · Fable ${st.allowFable ? '허용' : '금지'}`
+      + ` · 전환 제안: ${st.askAt || 'opus'} 이상일 때 상향, 하향 ${st.down === false ? '꺼짐' : '켜짐'}`,
   ].join('\n');
 }
 

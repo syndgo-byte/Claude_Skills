@@ -1,90 +1,96 @@
 ---
 name: token-router
-description: Before starting a coding task with more than one step, pick the cheapest Claude model that can do it (Haiku, Sonnet, Opus, Fable) and hand the work to a subagent on that model when it differs from yours. Skip for quick questions answered from context already loaded.
+description: 사용량 한도 안에서 큰 작업을 끝내기 위한 토큰 절약 규칙. 작업을 단계별로 나눠 모델과 effort를 배정하고, 대화가 길어지면 handoff-mmdd-hhmm.md 인수인계 파일로 새 세션에 넘긴다. 큰 작업, 여러 파일·엑셀 처리, "토큰 아껴", "세션 분리", "handoff" 요청에 사용.
 ---
 
-# Token router
+# token-router
 
-Bigger models cost more per token. Most work does not need the biggest one.
-`scripts/route.js` picks the model with local rules; unclear cases go to a free external classifier
-(no API key). The choice itself uses no Claude tokens.
+토큰은 대부분 **매 턴마다 대화 전체를 다시 읽는 비용**에서 나간다. 그래서 절약 순서는
+① 대화를 짧게 유지(세션 분리) → ② 파일 내용을 대화에 넣지 않기(스크립트로 처리) → ③ 단계별로 싼 모델·낮은 effort 쓰기.
 
-## Why this saves tokens
+스크립트 경로: 이 SKILL.md가 있는 폴더(`~/.claude/skills/token-router/`).
+설치·제거·설정 변경 요청이면 같은 폴더의 `README.md`를 따른다(`node install.js`).
+모델 전환 제안은 훅이 전송 전에 처리하므로, 모델이 따로 판단하거나 언급하지 않는다.
 
-The skill runs on top of whatever model the session already is. Opus costs roughly 2x Sonnet's usage
-per token, so the session model is the biggest lever — pick it deliberately, don't rely on routing alone:
+## 1. 큰 작업을 시작할 때: 계획과 배정
 
-- **Run the session on Sonnet, not Opus.** Every turn of reading the conversation, calling tools, and
-  reviewing results happens at the session model's rate. An Opus session pays Opus rates for that
-  regardless of what gets delegated. A Sonnet session pays Sonnet rates for it, and only escalates to
-  `opus` for the few tasks that need it.
-- **Small work goes down to Haiku**, cheaper than Sonnet.
-- **The routing decision itself is free**: local rules run instantly with no model call; the fallback
-  classifier is a keyless external endpoint, not Claude.
+1. 현재(가장 강한) 모델로 전체 계획을 세운다. 각 단계는 한 세션에서 끝낼 수 있는 크기로 나눈다.
+2. 단계마다 `node <스킬폴더>/route.js "<단계 설명>"`를 실행해 모델·effort 추천을 받고, 판단이 다르면 이유와 함께 조정한다.
+   결과 예: `{"route":"sonnet","effort":"medium",...}` (haiku는 effort 없음)
+3. 계획을 표로 보여준다: 단계 / 할 일 / 권장 모델·effort / 예상 세션 수.
+4. 사용자가 한 번에 자세히 지시하도록 유도한다. 짧은 질문을 여러 번 주고받는 것이 가장 비싸다.
 
+## 2. 매 답변 끝: 세션 판단 한 줄
+
+답변 마지막에 한 줄만 붙인다.
+
+- `세션: 유지 (맥락 약 NNk)` 또는
+- `세션: 새로 시작 권장 → handoff-mmdd-hhmm.md 작성함`
+
+판단 기준: `node <스킬폴더>/handoff.js check` 결과의 `recommend`, 또는 훅 알림. 다음 단계가 지금까지 읽은 큰 파일 내용과 무관하면 기준 미만이어도 새 세션을 권한다.
+새 세션을 권할 때는 묻지 말고 바로 넘긴다:
+1. `node <스킬폴더>/snapshot.js`를 프로젝트 폴더에서 실행해 지난번 이후 바뀐 파일을 `<프로젝트>/backup-claude/<날짜-시각>/`에 압축(.gz) 백업한다. 민감 파일은 제외되고, 폴더는 5GB 이하로 자동 유지된다.
+2. handoff 파일을 작성한다(파일 이름: `node <스킬폴더>/handoff.js name`).
+
+## 3. handoff 파일 양식
+
+작업 폴더에 만든다. 새 세션이 **이 파일만 읽고** 바로 이어갈 수 있어야 한다. 원본 파일 내용은 붙이지 말고 경로만 적는다.
+
+```markdown
+# handoff-mmdd-hhmm
+
+## 목표
+(전체 작업 목표 한두 줄)
+
+## 완료
+- (끝난 단계와 결과물 경로)
+
+## 다음 단계
+1. (바로 할 일) — 권장: sonnet / medium
+2. ...
+
+## 파일·스크립트
+- `경로` — 역할 (읽을 필요 있는지 표시)
+- `.handoff/journal-*.md` — 자동 작업 일지 (필요할 때만 참고)
+
+## 미완료·주의
+- 스냅샷: `경로` (제외된 파일: ...)
+- 반쯤 된 변경 / 깨진 테스트 / 실행 중인 프로세스: (새 세션이 가장 먼저 처리할 것)
+
+## 결정 사항
+- (확정된 규칙, 피해야 할 것, 사용자 선호)
+
+## 검증 방법
+- (결과가 맞는지 확인하는 명령/기준)
+
+## 다음 세션 권장 모델
+- (예: /model sonnet)
 ```
-Session (e.g. Sonnet)
-   │  before starting a multi-step task
-   ▼
-route.js — local rules (instant, 0 tokens)
-   │
-   ├─ confident match ───────────────────────► route decided
-   │
-   └─ unclear ──► free classifier (keyless, ~1-6s, 0 Claude tokens)
-                     │
-                     ├─ answered ──► route decided
-                     └─ no answer (queue/timeout) ──► sonnet (default)
 
-route vs. session model
-   │
-   ├─ route == session model ──► do it here, no delegation
-   ├─ route == haiku          ──► Agent tool, model:"haiku"   (down)
-   ├─ route == opus           ──► Agent tool, model:"opus"    (up)
-   └─ route == fable          ──► off by default (--fable on; uses extra credits)
-                                        │
-                                        ▼
-                          verify diff/tests, fold back only a short summary
-```
+작성 후 사용자에게 "새 대화를 열면 이어서 할지 물어봅니다"라고만 안내한다. 새 대화가 시작되면 훅이 최신 handoff를 알려 주므로 사용자는 파일 이름을 입력할 필요가 없다.
+훅이 이전 handoff를 알리면: 첫 답변에서 "이전 작업(목표: …)을 이어서 할까요?"라고 묻고, 예라면 그 파일만 읽고 이어간 뒤 `node <스킬폴더>/handoff.js used <파일>`로 정리한다.
 
-This beats defaulting everything to Opus: routine work runs at Sonnet or Haiku rates, and Opus is spent
-only where the task actually needs its judgement. It is not free of overhead — a subagent starts with an
-empty context, so delegating work smaller than the handoff itself can cost more than doing it inline (see
-"When to use" below).
+## 4. 자동 작업 일지
 
-## When to use
+훅이 N턴마다(기본 5턴), 그리고 대화 압축 직전과 세션 종료 때 `.handoff/journal-mmdd-<세션>.md`에 요청·수정 파일·명령·마지막 답변 앞부분을 자동으로 붙인다. 토큰을 쓰지 않는다.
 
-- Before a task that will take several tool calls: searching, implementing, fixing, refactoring, designing.
-- Not for a short answer, or when the work is smaller than the handoff. A subagent starts with an empty
-  context, so delegating tiny work costs more than doing it.
+- 이 일지는 판단 근거가 없는 기계 기록이다. 인수인계는 handoff 파일이 기준이고, 일지는 "무엇을 했는지" 확인할 때만 필요한 구간을 읽는다. 통째로 읽지 않는다.
+- 새 세션이나 다른 도구(Codex, Antigravity 등)에서 이어갈 때: handoff 파일을 먼저 읽고, 부족할 때만 일지의 마지막 구간을 읽는다.
+- 지금 바로 기록이 필요하면 `node <스킬폴더>/journal.js now`를 실행한다.
 
-## Steps
+## 5. 대용량 데이터(엑셀·CSV 등)
 
-1. Run the router with a one-sentence summary of the task (any language):
+- 파일 내용을 대화에 출력하거나 통째로 읽지 않는다. 구조(시트·열 이름·행 수)만 확인한다.
+- 계산·집계·검증은 Python 스크립트를 만들어 실행하고, 결과 요약만 대화에 남긴다.
+- 스크립트는 파일로 저장해 다음 세션이 재사용하게 하고, handoff 파일에 경로를 적는다.
 
-   ```bash
-   node "<this skill dir>/scripts/route.js" "<task summary>"
-   ```
+## 6. 작업 루프에서 맥락 키우지 않기
 
-   It prints one line of JSON, for example `{"route":"haiku","by":"rules","why":"..."}`.
-   `route` is `haiku`, `sonnet`, `opus`, `fable`, or `self` (routing turned off).
+도구를 한 번 부를 때마다 대화 전체를 다시 읽는다. 질문 하나에 호출 수십 번이면 맥락이 수십만 토큰으로 커진다.
 
-2. Compare `route` with the model you are running on:
-
-   - Same model, or `self`: do the work yourself.
-   - Different model: use the Agent tool with `model: "<route>"`. Give self-contained instructions (files,
-     acceptance criteria). Ask for back only the changed files and a short summary.
-
-   This works in both directions: a Sonnet session hands design work up to `opus`; an Opus session hands
-   lookups down to `haiku`.
-
-3. Check delegated work before reporting it done: read the diff or run the tests. Do not paste the
-   subagent's full output into the reply.
-
-4. You may override the route when you know better (for example the user named a model). Say so in one line.
-
-## Other commands
-
-- `node scripts/route.js --stats`: routing counts for the last 30 days and current settings.
-- `--off` / `--on`: turn routing off or on.
-- `--llm off` / `--llm on`: stop or allow sending unclear task summaries to the free classifier.
-- `--fable on` / `--fable off`: allow routing to Fable. Off by default because Fable uses extra usage credits.
+- 명령 출력이 길 것 같으면 파일로 저장하고 필요한 줄만 본다(`> out.txt` 후 `tail`/`grep`, 출력 제한 옵션 사용).
+- 큰 파일(HTML, 데이터, 보고서)을 Write로 통째로 여러 번 다시 쓰지 않는다. 바뀐 부분만 Edit로 고치거나, 생성 스크립트를 만들어 실행한다. 데이터는 HTML에 붙이지 말고 별도 파일로 둔다.
+- 여러 파일을 훑는 탐색·조사는 서브에이전트(Agent 도구, 가능하면 싼 모델)에 맡기고 요약만 받는다. 서브에이전트가 읽은 내용은 메인 대화에 남지 않는다.
+- 이미 읽은 파일을 다시 통째로 읽지 않는다.
+- `backup-claude/`는 압축 백업이라 읽지 않는다. 되돌려야 하면 `node <스킬폴더>/snapshot.js --restore <날짜-시각|latest> [파일]`을 쓴다(되돌릴지는 사용자가 정함).
+- 훅이 "맥락 기준 초과"를 알리면 예외 없이: 하던 단위 작업만 온전한 상태로 마무리하고, 스냅샷 → handoff 작성 → 멈춰서 사용자에게 새 세션을 안내한다.
