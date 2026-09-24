@@ -104,7 +104,7 @@ function write({ transcript, sessionId, cwd, force, reason }) {
   if (!force && s.prompts.length < every) return null;
 
   const root = cwd || process.cwd();
-  const dir = path.join(root, '.handoff');
+  const dir = path.join(state.handoffDir(transcript), '.handoff');
   const d = new Date();
   const p = (n) => String(n).padStart(2, '0');
   const file = path.join(dir, `journal-${p(d.getMonth() + 1)}${p(d.getDate())}-${key.slice(0, 8)}.md`);

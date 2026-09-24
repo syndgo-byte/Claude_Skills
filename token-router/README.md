@@ -80,6 +80,8 @@ node handoff.js check            # 가장 최근 대화의 맥락 크기와 권�
 node handoff.js name             # handoff-mmdd-hhmm.md
 node handoff.js --threshold 60000   # 질문 사이 새 세션 권장 기준 (기본 80k)
 node handoff.js --loop 120000       # 작업 루프 중단 기준 (기본 150k)
+node handoff.js where               # 최근 대화의 handoff·백업 위치 (수정한 파일 기준)
+node handoff.js --home E:/handoff   # 파일 수정 없는 대화의 handoff 위치 (기본 D:\Claude_handoff)
 
 node snapshot.js                    # 지금 폴더에서 바뀐 파일 백업
 node snapshot.js --list             # 이 프로젝트의 백업 목록
@@ -122,6 +124,21 @@ node journal.js now              # 지금 바로 기록
   }
 }
 ```
+
+## handoff 저장 위치
+
+기준은 대화를 연 위치가 아니라 **그 대화에서 수정한 파일**입니다.
+
+- **파일을 수정한 대화** (예: `.py` 수정): 그 파일이 속한 프로젝트 폴더(`.git`·`pyproject.toml`·`package.json`·`requirements.txt` 등이 있는 가장 가까운 상위 폴더, 없으면 파일이 있는 폴더)에 handoff·백업·일지를 둡니다.
+- **파일 수정 없이 명령만 친 대화**: handoff·일지는 **`D:\Claude_handoff`**에 두고 백업은 하지 않습니다. 위치는 `node handoff.js --home <폴더>`로 바꿀 수 있습니다.
+- `~/.claude` 설정·임시 폴더·handoff 파일을 고친 것은 프로젝트 작업으로 치지 않습니다.
+- handoff가 작성되면 위치를 기록해 두므로, 새 대화를 어느 폴더에서 열어도 "이전 작업이 있습니다"를 띄웁니다.
+
+## handoff 후 흐름
+
+1. handoff 파일이 작성되면 화면에 **"✅ 작성 완료. 새 대화(+ 버튼)를 열거나 /clear 를 입력한 뒤 '이어서 해줘'라고 하세요"**가 뜹니다.
+2. 그 대화에서 질문을 더 보내면 **훅이 막고** 같은 안내를 다시 띄웁니다(토큰 0). `/clear` 같은 명령은 통과합니다.
+3. 새 대화(또는 `/clear` 후)에서 **"📄 이전 작업이 있습니다"**가 뜨면 "이어서 해줘"라고 하세요.
 
 ## 스냅샷(백업) 규칙
 

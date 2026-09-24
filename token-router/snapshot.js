@@ -100,6 +100,9 @@ function prune(dir, capBytes) {
 }
 
 async function snapshot(projectDir, only = null) {
+  if (!state.isProject(projectDir)) {
+    return { ok: true, lines: ['프로젝트 폴더가 아니라(홈·드라이브 루트 등) 백업을 건너뜀.'] };
+  }
   const c = config();
   const cap = c.maxGB * 1073741824;
   const project = path.resolve(projectDir);

@@ -9,6 +9,8 @@
 //   node handoff.js guard                     -> PostToolUse hook: stops a long tool loop past the loop threshold
 //   node handoff.js start                     -> SessionStart hook: offers to continue from the latest handoff
 //   node handoff.js used <file>               -> file a handoff away in .handoff/done/ once it has been picked up
+//   node handoff.js where [transcript]        -> where this session's handoff would go
+//   node handoff.js --home <dir>              -> handoff folder for sessions that edited no files (default D:\Claude_handoff)
 //   node handoff.js name                      -> handoff-mmdd-hhmm.md for now
 //   node handoff.js --threshold <tokens>      -> when to recommend a new session (default 80000)
 //   node handoff.js --loop <tokens>           -> when to stop a tool loop mid-prompt (default 150000)
@@ -118,17 +120,36 @@ function hook() {
   const input = readStdin();
   const file = input.transcript_path || latestTranscript();
   const key = input.session_id || file;
+  const sess = loadSession(key);
+  // Once this session has written its handoff, it is over: every further prompt would re-read the
+  // whole context. Stop prompts here (the model never sees them, so this is free); /commands pass.
+  if (String(input.prompt || '').trim().startsWith('/')) return; // /clear, /model ... pass untouched
+  if (sess.handoffWritten) {
+    console.log(JSON.stringify({
+      decision: 'block',
+      reason: `[token-router] 이 대화는 인수인계를 마쳤습니다 (${sess.handoffWritten}). 새 대화(+ 버튼)를 열거나 /clear 를 입력한 뒤 "이어서 해줘"라고 하세요.`
+        + ' 여기서 계속하면 대화 전체를 다시 읽어 토큰이 많이 듭니다.',
+    }));
+    return;
+  }
   const r = check(file);
   if (r.error || r.recommend !== 'new') return;
-  const sess = loadSession(key);
   const level = Math.floor(r.context / r.threshold);
   if ((sess.noticeLevel || 0) >= level) return;
   sess.noticeLevel = level;
   saveSession(key, sess);
   state.log({ type: 'handoff-notice', context: r.context, turns: r.turns });
-  console.log(`[token-router] 현재 대화 맥락 약 ${Math.round(r.context / 1000)}k 토큰 (기준 ${Math.round(r.threshold / 1000)}k).`
-    + ` 이번 답변 끝에 새 세션 전환을 제안하고, 사용자가 동의하면 ${handoffName()} 인수인계 파일을`
-    + ' token-router 스킬의 양식대로 작성하세요 (.handoff/journal-*.md 일지 경로도 적을 것).');
+  const k = Math.round(r.context / 1000);
+  const target = path.join(state.handoffDir(file), handoffName());
+  // systemMessage is shown to the user directly, so the notice does not depend on the model passing it on.
+  console.log(JSON.stringify({
+    systemMessage: `⚠ [token-router] 대화 맥락 약 ${k}k 토큰 (기준 ${Math.round(r.threshold / 1000)}k). 새 대화로 넘어가야 토큰이 줄어듭니다. "handoff 해줘"라고 하면 정리한 뒤 넘어갑니다.`,
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext: `[token-router] 대화 맥락 약 ${k}k 토큰. 사용자에게 이미 알렸다. 이번 답변 마지막 줄에 "세션: 새 대화로 넘어가세요 (맥락 약 ${k}k)"를 쓰고,`
+        + ` 사용자가 handoff를 원하면 ${target} 에 token-router 스킬 양식대로 작성하라.`,
+    },
+  }));
 }
 
 // PostToolUse: the prompt hook above only runs between prompts, but one prompt can run a tool
@@ -142,6 +163,25 @@ function guard() {
   const file = input.transcript_path;
   const st = state.load();
   if (!file) return;
+  // A handoff was just written: record where it is, close this session, and tell the user to move on.
+  const written = (input.tool_input || {}).file_path || '';
+  if (state.EDIT_TOOLS.includes(input.tool_name) && HANDOFF_FILE.test(path.basename(written))) {
+    const full = path.resolve(input.cwd || process.cwd(), written);
+    state.recordHandoff(full);
+    const key = input.session_id || file;
+    const sess = loadSession(key);
+    sess.handoffWritten = path.basename(full);
+    saveSession(key, sess);
+    state.log({ type: 'handoff-written', file: full });
+    console.log(JSON.stringify({
+      systemMessage: `✅ [token-router] 인수인계 파일 작성 완료: ${full}\n새 대화(+ 버튼)를 열거나 /clear 를 입력한 뒤 "이어서 해줘"라고 하세요.`,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: '[token-router] handoff가 작성됐다. 더 작업하지 말고 "새 대화(+)를 열거나 /clear 후 \'이어서 해줘\'라고 하세요" 한 줄만 안내하고 끝내라.',
+      },
+    }));
+    return;
+  }
   const limit = st.loopTokens || DEFAULT_LOOP;
   const context = lastContext(file);
   if (!context || context < limit) return;
@@ -152,14 +192,22 @@ function guard() {
   sess.loopLevel = level;
   saveSession(key, sess);
   state.log({ type: 'loop-guard', context, tool: input.tool_name });
+  const project = state.editedProject(file);
+  const target = path.join(project || state.fallbackDir(), handoffName());
   const reason = `[token-router] 맥락이 약 ${Math.round(context / 1000)}k 토큰입니다 (기준 ${Math.round(limit / 1000)}k).`
     + ' 매 호출마다 이 전체를 다시 읽으므로 여기서 끊는 편이 쌉니다.'
     + ' 1) 지금 하던 단위 작업만 마무리해 파일과 테스트를 온전한 상태로 두세요(편집 중간에 멈추지 말 것).'
     + ' 새 파일을 크게 읽거나 긴 출력을 내는 작업은 더 하지 마세요.'
-    + ` 2) node "${path.join(__dirname, 'snapshot.js').replace(/\\/g, '/')}" 를 프로젝트 폴더에서 실행해 바뀐 파일을 프로젝트의 backup-claude 폴더에 백업하세요(민감 파일 제외, 5GB 이하 자동 유지).`
-    + ` 3) ${handoffName()}를 token-router 스킬 양식대로 작성하고, "미완료·주의"에 스냅샷 경로·제외 파일·반쯤 된 변경·깨진 테스트·실행 중인 프로세스를 적으세요.`
-    + ' 4) 사용자에게 "새 대화를 열면 이어서 할지 물어봅니다"라고 안내하고 멈추세요.';
-  console.log(JSON.stringify({ decision: 'block', reason }));
+    + (project
+      ? ` 2) node "${path.join(__dirname, 'snapshot.js').replace(/\\/g, '/')}" "${project}" 를 실행해 바뀐 파일을 백업하세요(민감 파일 제외, 5GB 이하 자동 유지).`
+      : ' 2) 수정한 프로젝트 파일이 없으니 백업은 생략하세요.')
+    + ` 3) ${target} 를 token-router 스킬 양식대로 작성하고, "미완료·주의"에 백업 경로·제외 파일·반쯤 된 변경·깨진 테스트·실행 중인 프로세스를 적으세요.`
+    + ' 4) 사용자에게 "새 대화(+)를 열거나 /clear 후 이어서 해줘"라고 안내하고 멈추세요.';
+  console.log(JSON.stringify({
+    decision: 'block',
+    reason,
+    systemMessage: `⚠ [token-router] 맥락 약 ${Math.round(context / 1000)}k 토큰으로 기준(${Math.round(limit / 1000)}k)을 넘었습니다. 하던 작업을 정리하고 백업·handoff 후 멈춥니다.`,
+  }));
 }
 
 // SessionStart (new session or /clear): find the newest handoff in the project and have Claude
@@ -191,30 +239,51 @@ function goalLine(file) {
 function start() {
   const input = readStdin();
   if (input.source && !['startup', 'clear'].includes(input.source)) return; // not on resume/compact
-  const dir = input.cwd || process.cwd();
-  const f = latestHandoff(dir);
-  if (!f) return;
-  const goal = goalLine(path.join(dir, f));
+  // Candidates: every recorded handoff, plus any in this folder or the shared folder.
+  const cands = [];
+  const add = (p) => {
+    try {
+      const t = fs.statSync(p).mtimeMs;
+      if (HANDOFF_FILE.test(path.basename(p)) && Date.now() - t <= HANDOFF_MAX_AGE && !cands.some((c) => c.p === p)) cands.push({ p, t });
+    } catch { /* moved or deleted */ }
+  };
+  for (const e of state.handoffIndex()) add(e.path);
+  for (const d of [input.cwd, state.fallbackDir()]) {
+    if (!d) continue;
+    let items = [];
+    try { items = fs.readdirSync(d); } catch { continue; }
+    for (const f of items) add(path.join(d, f));
+  }
+  if (!cands.length) return;
+  // Prefer a handoff from the folder this session was opened in; otherwise the newest anywhere.
+  const cwd = input.cwd ? path.resolve(input.cwd) : null;
+  const here = cands.filter((c) => cwd && path.dirname(c.p).toLowerCase() === cwd.toLowerCase());
+  const f = (here.length ? here : cands).sort((a, b) => b.t - a.t)[0].p;
+  const goal = goalLine(f);
   state.log({ type: 'handoff-offer', file: f });
-  console.log(`[token-router] 이 프로젝트에 이전 작업 인수인계 파일 ${f}${goal ? ` (목표: ${goal})` : ''}가 있습니다.`
-    + ' 사용자의 첫 메시지에 답하기 전에 "이전 작업을 이어서 할까요?"라고 한 줄로 물으세요.'
-    + ` 이어서 하겠다고 하면 ${f}만 읽고 "미완료·주의"부터 처리한 뒤 "다음 단계"를 진행하고,`
-    + ` 다 읽은 뒤 node "${path.join(__dirname, 'handoff.js').replace(/\\/g, '/')}" used ${f} 를 실행하세요.`
-    + ' 아니라고 하면 이 안내는 무시하고 사용자 요청만 처리하세요.');
+  const ctx = `[token-router] 이전 작업 인수인계 파일 ${f}${goal ? ` (목표: ${goal})` : ''}가 있습니다.`
+    + ' 사용자가 이어서 하자고 하면(예: "이어서 해줘") 이 파일만 읽고 "미완료·주의"부터 처리한 뒤 "다음 단계"를 진행하고,'
+    + ` 다 읽은 뒤 node "${path.join(__dirname, 'handoff.js').replace(/\\/g, '/')}" used "${f}" 를 실행하세요.`
+    + ' 다른 요청이면 이 안내는 무시하세요.';
+  console.log(JSON.stringify({
+    systemMessage: `📄 [token-router] 이전 작업이 있습니다: ${f}${goal ? ` (목표: ${goal})` : ''}\n이어서 하려면 "이어서 해줘"라고 하세요.`,
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: ctx },
+  }));
 }
 
 // Move a picked-up handoff out of the project root so it is not offered again.
 function used(name) {
-  const dir = process.cwd();
-  const src = path.join(dir, path.basename(String(name || '')));
+  const n = String(name || '');
+  const src = path.isAbsolute(n) ? n
+    : (state.handoffIndex().map((x) => x.path).reverse().find((p) => path.basename(p) === path.basename(n)) || path.resolve(n));
   if (!HANDOFF_FILE.test(path.basename(src)) || !fs.existsSync(src)) {
     console.error(`handoff 파일이 없음: ${name}`);
     process.exit(1);
   }
-  const done = path.join(dir, '.handoff', 'done');
+  const done = path.join(path.dirname(src), '.handoff', 'done');
   fs.mkdirSync(done, { recursive: true });
   fs.renameSync(src, path.join(done, path.basename(src)));
-  console.log(`정리함: ${path.join('.handoff', 'done', path.basename(src))}`);
+  console.log(`정리함: ${path.join(done, path.basename(src))}`);
 }
 
 function main() {
@@ -223,6 +292,18 @@ function main() {
   if (cmd === 'guard') return guard();
   if (cmd === 'start') return start();
   if (cmd === 'used') return used(arg);
+  if (cmd === 'where') {
+    const t = arg || latestTranscript();
+    const project = t && state.editedProject(t);
+    return console.log(project ? `수정한 파일의 프로젝트 → handoff·백업 위치: ${project}` : `수정한 프로젝트 파일 없음 → handoff 위치: ${state.fallbackDir()} (백업 안 함)`);
+  }
+  if (cmd === '--home') {
+    if (!arg) { console.error('usage: node handoff.js --home <폴더>'); process.exit(2); }
+    const st = state.load();
+    st.handoffHome = path.resolve(arg);
+    state.save(st);
+    return console.log(`파일 수정 없는 대화의 handoff 위치: ${st.handoffHome}`);
+  }
   if (cmd === '--loop') {
     const n = Number(arg);
     if (!(n > 0)) { console.error('usage: node handoff.js --loop <tokens>'); process.exit(2); }
