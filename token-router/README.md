@@ -46,7 +46,7 @@ node install.js --uninstall   # 훅 제거 (파일은 남음)
 | 이벤트 | 스크립트 | 동작 | 토큰 |
 |---|---|---|---|
 | `UserPromptSubmit` | `route.js` | 질문을 모델에 보내기 **전에** 난도를 판정합니다. 현재 모델과 안 맞으면 질문을 막고 전환을 제안합니다. | 0 (막힌 질문과 안내문은 사용자에게만 보이고 모델 맥락에 들어가지 않음) |
-| `UserPromptSubmit` | `handoff.js` | 맥락이 80k, 160k처럼 기준을 한 단계 넘을 때마다 한 줄 알림을 띄웁니다. 모델이 새 세션 전환과 handoff 작성을 제안하게 됩니다. | 알림 1회당 약 100토큰 (모델이 읽어야 동작하므로 의도된 비용). 기준 미만일 때는 0 |
+| `UserPromptSubmit` | `handoff.js` | **80k 경고.** 맥락이 80k·160k…를 넘은 뒤 첫 질문을 막고 본문에 크게 "새 대화로 넘어갈 때입니다"를 띄웁니다(Windows 알림 풍선·소리도 함께). "handoff 해줘"라고 하면 정리 후 넘어가고, 같은 질문을 한 번 더 보내면 그대로 계속합니다. | 0 (막힌 질문은 모델에 안 감) |
 | `Stop` | `journal.js` | 새 요청이 N턴(기본 5) 쌓였을 때만 일지를 기록합니다. | 0 (출력 없음) |
 | `PreCompact`, `SessionEnd` | `journal.js` | 압축 직전과 세션 종료 때 남은 내용을 기록합니다. | 0 (출력 없음) |
 | `SessionStart` | `handoff.js start` | **이어하기 제안.** 새 대화를 열거나 `/clear`하면 프로젝트 폴더에서 7일 이내 가장 최근 handoff 파일을 찾습니다. Claude가 첫 답변에서 "이전 작업(목표: …)을 이어서 할까요?"라고 묻고, 예라고 하면 그 파일만 읽고 이어갑니다. 다 읽은 handoff는 `.handoff/done/`으로 옮겨 다시 묻지 않습니다. 파일 이름을 입력할 필요가 없습니다. | handoff가 있을 때만 약 80토큰 |
@@ -80,6 +80,7 @@ node handoff.js check            # 가장 최근 대화의 맥락 크기와 권�
 node handoff.js name             # handoff-mmdd-hhmm.md
 node handoff.js --threshold 60000   # 질문 사이 새 세션 권장 기준 (기본 80k)
 node handoff.js --loop 120000       # 작업 루프 중단 기준 (기본 150k)
+node handoff.js --toast off         # Windows 알림 풍선·소리 끄기 (기본 켜짐)
 node handoff.js where               # 최근 대화의 handoff·백업 위치 (수정한 파일 기준)
 node handoff.js --home E:/handoff   # 파일 수정 없는 대화의 handoff 위치 (기본 D:\Claude_handoff)
 

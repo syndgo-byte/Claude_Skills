@@ -9,6 +9,7 @@
 //   node handoff.js guard                     -> PostToolUse hook: stops a long tool loop past the loop threshold
 //   node handoff.js start                     -> SessionStart hook: offers to continue from the latest handoff
 //   node handoff.js used <file>               -> file a handoff away in .handoff/done/ once it has been picked up
+//   node handoff.js --toast on|off           -> Windows balloon + sound with the warnings (default on)
 //   node handoff.js where [transcript]        -> where this session's handoff would go
 //   node handoff.js --home <dir>              -> handoff folder for sessions that edited no files (default D:\Claude_handoff)
 //   node handoff.js name                      -> handoff-mmdd-hhmm.md for now
@@ -116,6 +117,22 @@ function readStdin() {
 
 // Hook output is added to Claude's context, so stay silent below the threshold and remind only
 // once per threshold step (80k, 160k, ...) instead of on every prompt.
+// Windows balloon notification with a sound, for when the chat panel is not in view. Runs detached
+// so the hook returns at once; any failure is ignored. Off with --toast off.
+function toast(title, text) {
+  if (process.platform !== 'win32' || state.load().toast === false) return;
+  const q = (s) => String(s).replace(/'/g, "''");
+  const ps = 'Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing;'
+    + ' $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Warning; $n.Visible = $true;'
+    + ` $n.ShowBalloonTip(10000, '${q(title)}', '${q(text)}', [System.Windows.Forms.ToolTipIcon]::Warning);`
+    + ' [System.Media.SystemSounds]::Exclamation.Play(); Start-Sleep -Seconds 11; $n.Dispose()';
+  try {
+    const c = require('child_process').spawn('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', ps],
+      { detached: true, stdio: 'ignore', windowsHide: true });
+    c.unref();
+  } catch { /* no PowerShell: the chat message still shows */ }
+}
+
 function hook() {
   const input = readStdin();
   const file = input.transcript_path || latestTranscript();
@@ -132,23 +149,41 @@ function hook() {
     }));
     return;
   }
+  const prompt = String(input.prompt || '').trim();
   const r = check(file);
   if (r.error || r.recommend !== 'new') return;
-  const level = Math.floor(r.context / r.threshold);
-  if ((sess.noticeLevel || 0) >= level) return;
-  sess.noticeLevel = level;
-  saveSession(key, sess);
-  state.log({ type: 'handoff-notice', context: r.context, turns: r.turns });
   const k = Math.round(r.context / 1000);
   const target = path.join(state.handoffDir(file), handoffName());
-  // systemMessage is shown to the user directly, so the notice does not depend on the model passing it on.
+  // The user is already moving on: let it through and tell Claude where the handoff goes.
+  if (/handoff|핸드오프|인수인계/i.test(prompt)) {
+    console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit',
+      additionalContext: `[token-router] 대화 맥락 약 ${k}k 토큰. handoff는 ${target} 에 token-router 스킬 양식대로 작성하라.` } }));
+    return;
+  }
+  const level = Math.floor(r.context / r.threshold);
+  if ((sess.noticeLevel || 0) >= level) return;
+  // Stop the first prompt past each threshold step so the warning shows in the chat itself (a
+  // plain notice is easy to miss). Free: the model never sees it. Resending the same prompt
+  // means "keep going here".
+  const hash = require('crypto').createHash('sha1').update(prompt).digest('hex');
+  const pending = sess.noticePending || {};
+  if (pending.level === level && pending.key === hash) {
+    sess.noticeLevel = level;
+    delete sess.noticePending;
+    saveSession(key, sess);
+    state.log({ type: 'handoff-notice-skipped', context: r.context });
+    return;
+  }
+  sess.noticePending = { level, key: hash };
+  saveSession(key, sess);
+  state.log({ type: 'handoff-notice', context: r.context, turns: r.turns });
+  toast('token-router: 새 대화로 넘어갈 때입니다', `대화 맥락 약 ${k}k 토큰 (기준 ${Math.round(r.threshold / 1000)}k)`);
   console.log(JSON.stringify({
-    systemMessage: `⚠ [token-router] 대화 맥락 약 ${k}k 토큰 (기준 ${Math.round(r.threshold / 1000)}k). 새 대화로 넘어가야 토큰이 줄어듭니다. "handoff 해줘"라고 하면 정리한 뒤 넘어갑니다.`,
-    hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
-      additionalContext: `[token-router] 대화 맥락 약 ${k}k 토큰. 사용자에게 이미 알렸다. 이번 답변 마지막 줄에 "세션: 새 대화로 넘어가세요 (맥락 약 ${k}k)"를 쓰고,`
-        + ` 사용자가 handoff를 원하면 ${target} 에 token-router 스킬 양식대로 작성하라.`,
-    },
+    decision: 'block',
+    reason: `⚠⚠ [token-router] 대화 맥락 약 ${k}k 토큰 — 새 대화로 넘어갈 때입니다 (기준 ${Math.round(r.threshold / 1000)}k).\n`
+      + '지금부터는 질문할 때마다 이 대화 전체를 다시 읽어서 토큰이 빠르게 줄어듭니다.\n'
+      + '→ 넘기기: "handoff 해줘" 라고 보내세요. 정리한 뒤 새 대화로 넘어가게 안내합니다.\n'
+      + '→ 그냥 계속: 방금 질문을 한 번 더 보내세요.',
   }));
 }
 
@@ -192,6 +227,7 @@ function guard() {
   sess.loopLevel = level;
   saveSession(key, sess);
   state.log({ type: 'loop-guard', context, tool: input.tool_name });
+  toast('token-router: 작업을 멈추고 넘깁니다', `맥락 약 ${Math.round(context / 1000)}k 토큰 (기준 ${Math.round(limit / 1000)}k)`);
   const project = state.editedProject(file);
   const target = path.join(project || state.fallbackDir(), handoffName());
   const reason = `[token-router] 맥락이 약 ${Math.round(context / 1000)}k 토큰입니다 (기준 ${Math.round(limit / 1000)}k).`
@@ -292,6 +328,12 @@ function main() {
   if (cmd === 'guard') return guard();
   if (cmd === 'start') return start();
   if (cmd === 'used') return used(arg);
+  if (cmd === '--toast') {
+    const st = state.load();
+    st.toast = arg !== 'off';
+    state.save(st);
+    return console.log(`Windows 알림: ${st.toast ? '켜짐' : '꺼짐'}`);
+  }
   if (cmd === 'where') {
     const t = arg || latestTranscript();
     const project = t && state.editedProject(t);
