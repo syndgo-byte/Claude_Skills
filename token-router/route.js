@@ -159,15 +159,15 @@ function currentTier(transcript, st) {
 // Switching down mid-session is only worth it while the context is small: caches are per model,
 // so the cheap model first re-reads the whole conversation at full price, and at 100k context
 // that one read costs more than the expensive model reading it from cache.
-const DOWN_MAX_CONTEXT = 30000;
+const DOWN_MAX_CONTEXT = 50000;  // relaxed: allow longer sessions with downgrade
 const HAIKU_MAX_CONTEXT = 150000; // Haiku 4.5 has a 200K window; leave room for the answer.
 
 function switchDirection(cur, d, st, context) {
   const have = ROUTES.indexOf(cur);
   const need = ROUTES.indexOf(d.route);
   if (need > have && need >= ROUTES.indexOf(st.askAt || 'opus')) return 'up';
-  // Down only for a clear rule verdict at least two tiers lower (opus -> haiku, fable -> sonnet).
-  if (st.down === false || d.by !== 'rules' || /확신 낮음/.test(d.why) || have - need < 2) return null;
+  // Down for clear rule verdict at least one tier lower (opus -> sonnet, sonnet -> haiku).
+  if (st.down === false || d.by !== 'rules' || /확신 낮음/.test(d.why) || have - need < 1) return null;
   if (context > (st.downMaxContext || DOWN_MAX_CONTEXT)) return null;
   if (d.route === 'haiku' && context > HAIKU_MAX_CONTEXT) return null;
   return 'down';
