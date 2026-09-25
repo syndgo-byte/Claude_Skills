@@ -13,15 +13,15 @@
 //   node handoff.js where [transcript]        -> where this session's handoff would go
 //   node handoff.js --home <dir>              -> handoff folder for sessions that edited no files (default D:\Claude_handoff)
 //   node handoff.js name                      -> handoff-mmdd-hhmm.md for now
-//   node handoff.js --threshold <tokens>      -> when to recommend a new session (default 80000)
-//   node handoff.js --loop <tokens>           -> when to stop a tool loop mid-prompt (default 150000)
+//   node handoff.js --threshold <tokens>      -> warning notice (default 80000)
+//   node handoff.js --loop <tokens>           -> forced handoff + input lock until /compact (default 200000)
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const state = require('./state');
 
 const DEFAULT_THRESHOLD = 80000;
-const DEFAULT_LOOP = 150000;
+const DEFAULT_LOOP = 200000;
 
 // Per-session memory lives in its own small file: hooks for the same event run in parallel,
 // and sharing state.json with them could lose writes.
@@ -69,6 +69,7 @@ function measure(file) {
     if (!l) continue;
     let e;
     try { e = JSON.parse(l); } catch { continue; }
+    if (e.subtype === 'compact_boundary') { context = 0; continue; } // compacted: old usage no longer applies
     const msg = e.message || {};
     if (e.type === 'user' && typeof msg.content === 'string') turns += 1;
     const u = msg.usage;
@@ -95,6 +96,7 @@ function lastContext(file) {
     for (let i = lines.length - 1; i >= 0; i -= 1) {
       let e;
       try { e = JSON.parse(lines[i]); } catch { continue; }
+      if (e.subtype === 'compact_boundary') return 0;
       const u = e.type === 'assistant' && e.message && e.message.usage;
       if (u) return (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
     }
@@ -133,116 +135,103 @@ function toast(title, text) {
   } catch { /* no PowerShell: the chat message still shows */ }
 }
 
+// Two steps. Past the warning threshold (default 80k): a notice only, work goes on. Past the
+// handoff threshold (default 200k): Claude writes the handoff, then input is locked until the
+// conversation is compacted (/compact) or cleared, so nobody keeps paying for the long context
+// without knowing it. After /compact, the SessionStart hook hands Claude the file and it goes on.
+const slash = (p) => String(p || '').trim().startsWith('/');
+const forceLimit = () => state.load().loopTokens || DEFAULT_LOOP;
+const snapshotCmd = (project) => `node "${path.join(__dirname, 'snapshot.js').replace(/\\/g, '/')}" "${project}"`;
+const LOCKED = (name) => `🔒 [token-router] 인수인계 완료 (${name}). 대화가 압축될 때까지 입력을 막습니다.\n`
+  + '→ /compact 를 입력하세요. 압축이 끝나면 handoff를 읽고 자동으로 이어갑니다. (/clear 후 "이어서 해줘"도 됩니다)';
+
+// What Claude must do to hand off; `then` says what happens after the file is written.
+function handoffSteps(file, context) {
+  const project = state.editedProject(file);
+  const target = path.join(project || state.fallbackDir(), handoffName());
+  return `[token-router] 맥락이 약 ${Math.round(context / 1000)}k 토큰으로 handoff 기준(${Math.round(forceLimit() / 1000)}k)을 넘었다.`
+    + ' 1) 하던 단위 작업만 마무리해 파일과 테스트를 온전한 상태로 둬라(편집 중간에 멈추지 말 것). 새 파일을 크게 읽거나 긴 출력을 내지 마라.'
+    + (project ? ` 2) ${snapshotCmd(project)} 를 실행해 바뀐 파일을 백업하라.` : ' 2) 수정한 프로젝트 파일이 없으니 백업은 생략하라.')
+    + ` 3) ${target} 를 token-router 스킬 양식대로 작성하라. 처리 못 한 사용자 요청은 "다음 단계" 맨 위에 적고, "미완료·주의"에 백업 경로·반쯤 된 변경·깨진 테스트·실행 중인 프로세스를 적어라.`
+    + ' 4) 작성 후 더 작업하지 마라. 훅이 입력을 잠그고 사용자에게 /compact를 안내한다.';
+}
+
 function hook() {
   const input = readStdin();
   const file = input.transcript_path || latestTranscript();
   const key = input.session_id || file;
   const sess = loadSession(key);
-  // Once this session has written its handoff, it is over: every further prompt would re-read the
-  // whole context. Stop prompts here (the model never sees them, so this is free); /commands pass.
-  if (String(input.prompt || '').trim().startsWith('/')) return; // /clear, /model ... pass untouched
+  if (slash(input.prompt)) return; // /compact, /clear, /model ... pass untouched
   if (sess.handoffWritten) {
+    console.log(JSON.stringify({ decision: 'block', reason: LOCKED(sess.handoffWritten) }));
+    return;
+  }
+  const r = check(file);
+  if (r.error || !r.context) return;
+  const k = Math.round(r.context / 1000);
+  if (r.context >= forceLimit()) {
+    if (sess.handoffForced) return; // already told; the loop guard repeats it if needed
+    sess.handoffForced = true;
+    saveSession(key, sess);
+    state.log({ type: 'handoff-forced', context: r.context, turns: r.turns });
+    toast('token-router: 인수인계 작성 중', `맥락 약 ${k}k 토큰 — 완료 알림까지 기다려 주세요`);
     console.log(JSON.stringify({
-      decision: 'block',
-      reason: `[token-router] 이 대화는 인수인계를 마쳤습니다 (${sess.handoffWritten}). 새 대화(+ 버튼)를 열거나 /clear 를 입력한 뒤 "이어서 해줘"라고 하세요.`
-        + ' 여기서 계속하면 대화 전체를 다시 읽어 토큰이 많이 듭니다.',
+      systemMessage: `📝 [token-router] 맥락 약 ${k}k 토큰 — 인수인계(handoff) 파일을 작성합니다. 완료 알림이 뜰 때까지 기다려 주세요.`,
+      hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: handoffSteps(file, r.context) },
     }));
     return;
   }
-  const prompt = String(input.prompt || '').trim();
-  const r = check(file);
-  if (r.error || r.recommend !== 'new') return;
-  const k = Math.round(r.context / 1000);
-  const target = path.join(state.handoffDir(file), handoffName());
-  // The user is already moving on: let it through and tell Claude where the handoff goes.
-  if (/handoff|핸드오프|인수인계/i.test(prompt)) {
-    console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: 'UserPromptSubmit',
-      additionalContext: `[token-router] 대화 맥락 약 ${k}k 토큰. handoff는 ${target} 에 token-router 스킬 양식대로 작성하라.` } }));
-    return;
-  }
   const level = Math.floor(r.context / r.threshold);
-  if ((sess.noticeLevel || 0) >= level) return;
-  // Stop the first prompt past each threshold step so the warning shows in the chat itself (a
-  // plain notice is easy to miss). Free: the model never sees it. Resending the same prompt
-  // means "keep going here".
-  const hash = require('crypto').createHash('sha1').update(prompt).digest('hex');
-  const pending = sess.noticePending || {};
-  if (pending.level === level && pending.key === hash) {
-    sess.noticeLevel = level;
-    delete sess.noticePending;
-    saveSession(key, sess);
-    state.log({ type: 'handoff-notice-skipped', context: r.context });
-    return;
-  }
-  sess.noticePending = { level, key: hash };
+  if (level < 1 || (sess.noticeLevel || 0) >= level) return;
+  sess.noticeLevel = level;
   saveSession(key, sess);
   state.log({ type: 'handoff-notice', context: r.context, turns: r.turns });
-  toast('token-router: 새 대화로 넘어갈 때입니다', `대화 맥락 약 ${k}k 토큰 (기준 ${Math.round(r.threshold / 1000)}k)`);
+  toast('token-router: 대화가 길어졌습니다', `맥락 약 ${k}k 토큰 (경고 ${Math.round(r.threshold / 1000)}k)`);
   console.log(JSON.stringify({
-    decision: 'block',
-    reason: `⚠⚠ [token-router] 대화 맥락 약 ${k}k 토큰 — 새 대화로 넘어갈 때입니다 (기준 ${Math.round(r.threshold / 1000)}k).\n`
-      + '지금부터는 질문할 때마다 이 대화 전체를 다시 읽어서 토큰이 빠르게 줄어듭니다.\n'
-      + '→ 넘기기: "handoff 해줘" 라고 보내세요. 정리한 뒤 새 대화로 넘어가게 안내합니다.\n'
-      + '→ 그냥 계속: 방금 질문을 한 번 더 보내세요.',
+    systemMessage: `⚠ [token-router] 대화 맥락 약 ${k}k 토큰 (경고 기준 ${Math.round(r.threshold / 1000)}k). 질문마다 이 전체를 다시 읽습니다.`
+      + ` ${Math.round(forceLimit() / 1000)}k에서 자동으로 인수인계합니다. 지금 넘기려면 "handoff 해줘".`,
   }));
 }
 
-// PostToolUse: the prompt hook above only runs between prompts, but one prompt can run a tool
-// loop of dozens of calls that grows the context to hundreds of thousands of tokens. Past the
-// loop threshold, tell Claude once (per threshold step) to reach a clean stopping point, write a
-// handoff and stop. It applies to every prompt, with no opt-out: a long loop is exactly the case
-// that burns the limit. The message costs ~150 tokens and lets Claude finish the edit in hand
-// rather than stop mid-change.
+// PostToolUse: one prompt can run a tool loop of dozens of calls, so the handoff threshold is
+// also checked after every tool call. It also notices the handoff file being written.
 function guard() {
   const input = readStdin();
   const file = input.transcript_path;
-  const st = state.load();
   if (!file) return;
-  // A handoff was just written: record where it is, close this session, and tell the user to move on.
+  const key = input.session_id || file;
   const written = (input.tool_input || {}).file_path || '';
   if (state.EDIT_TOOLS.includes(input.tool_name) && HANDOFF_FILE.test(path.basename(written))) {
     const full = path.resolve(input.cwd || process.cwd(), written);
     state.recordHandoff(full);
-    const key = input.session_id || file;
     const sess = loadSession(key);
     sess.handoffWritten = path.basename(full);
+    sess.handoffPath = full;
     saveSession(key, sess);
     state.log({ type: 'handoff-written', file: full });
+    toast('token-router: 인수인계 완료', '/compact 를 입력하면 자동으로 이어갑니다');
     console.log(JSON.stringify({
-      systemMessage: `✅ [token-router] 인수인계 파일 작성 완료: ${full}\n새 대화(+ 버튼)를 열거나 /clear 를 입력한 뒤 "이어서 해줘"라고 하세요.`,
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        additionalContext: '[token-router] handoff가 작성됐다. 더 작업하지 말고 "새 대화(+)를 열거나 /clear 후 \'이어서 해줘\'라고 하세요" 한 줄만 안내하고 끝내라.',
-      },
+      systemMessage: `✅ [token-router] 인수인계 파일 작성 완료: ${full}\n` + LOCKED(path.basename(full)),
+      hookSpecificOutput: { hookEventName: 'PostToolUse',
+        additionalContext: '[token-router] handoff 작성 완료. 더 작업하지 말고 "/compact 를 입력하면 압축 후 자동으로 이어갑니다" 한 줄만 안내하고 끝내라.' },
     }));
     return;
   }
-  const limit = st.loopTokens || DEFAULT_LOOP;
   const context = lastContext(file);
-  if (!context || context < limit) return;
-  const key = input.session_id || file;
+  if (!context || context < forceLimit()) return;
   const sess = loadSession(key);
-  const level = Math.floor(context / limit);
+  if (sess.handoffWritten) return;
+  const level = Math.floor(context / forceLimit());
   if ((sess.loopLevel || 0) >= level) return;
   sess.loopLevel = level;
+  sess.handoffForced = true;
   saveSession(key, sess);
   state.log({ type: 'loop-guard', context, tool: input.tool_name });
-  toast('token-router: 작업을 멈추고 넘깁니다', `맥락 약 ${Math.round(context / 1000)}k 토큰 (기준 ${Math.round(limit / 1000)}k)`);
-  const project = state.editedProject(file);
-  const target = path.join(project || state.fallbackDir(), handoffName());
-  const reason = `[token-router] 맥락이 약 ${Math.round(context / 1000)}k 토큰입니다 (기준 ${Math.round(limit / 1000)}k).`
-    + ' 매 호출마다 이 전체를 다시 읽으므로 여기서 끊는 편이 쌉니다.'
-    + ' 1) 지금 하던 단위 작업만 마무리해 파일과 테스트를 온전한 상태로 두세요(편집 중간에 멈추지 말 것).'
-    + ' 새 파일을 크게 읽거나 긴 출력을 내는 작업은 더 하지 마세요.'
-    + (project
-      ? ` 2) node "${path.join(__dirname, 'snapshot.js').replace(/\\/g, '/')}" "${project}" 를 실행해 바뀐 파일을 백업하세요(민감 파일 제외, 5GB 이하 자동 유지).`
-      : ' 2) 수정한 프로젝트 파일이 없으니 백업은 생략하세요.')
-    + ` 3) ${target} 를 token-router 스킬 양식대로 작성하고, "미완료·주의"에 백업 경로·제외 파일·반쯤 된 변경·깨진 테스트·실행 중인 프로세스를 적으세요.`
-    + ' 4) 사용자에게 "새 대화(+)를 열거나 /clear 후 이어서 해줘"라고 안내하고 멈추세요.';
+  toast('token-router: 인수인계 작성 중', `맥락 약 ${Math.round(context / 1000)}k 토큰 — 완료 알림까지 기다려 주세요`);
   console.log(JSON.stringify({
     decision: 'block',
-    reason,
-    systemMessage: `⚠ [token-router] 맥락 약 ${Math.round(context / 1000)}k 토큰으로 기준(${Math.round(limit / 1000)}k)을 넘었습니다. 하던 작업을 정리하고 백업·handoff 후 멈춥니다.`,
+    reason: handoffSteps(file, context),
+    systemMessage: `📝 [token-router] 맥락 약 ${Math.round(context / 1000)}k 토큰 — 하던 작업을 정리하고 인수인계 파일을 작성합니다. 완료 알림이 뜰 때까지 기다려 주세요.`,
   }));
 }
 
@@ -274,7 +263,8 @@ function goalLine(file) {
 
 function start() {
   const input = readStdin();
-  if (input.source && !['startup', 'clear'].includes(input.source)) return; // not on resume/compact
+  if (input.source === 'compact') return afterCompact(input);
+  if (input.source && !['startup', 'clear'].includes(input.source)) return; // not on resume
   // Candidates: every recorded handoff, plus any in this folder or the shared folder.
   const cands = [];
   const add = (p) => {
@@ -304,6 +294,23 @@ function start() {
   console.log(JSON.stringify({
     systemMessage: `📄 [token-router] 이전 작업이 있습니다: ${f}${goal ? ` (목표: ${goal})` : ''}\n이어서 하려면 "이어서 해줘"라고 하세요.`,
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: ctx },
+  }));
+}
+
+// After /compact (or auto-compaction): the context is small again, so unlock input, start the
+// warnings over, and hand Claude the handoff this session wrote.
+function afterCompact(input) {
+  const key = input.session_id || input.transcript_path;
+  const sess = loadSession(key);
+  const f = sess.handoffPath;
+  saveSession(key, {});
+  if (!f || !fs.existsSync(f)) return;
+  state.log({ type: 'handoff-compact', file: f });
+  console.log(JSON.stringify({
+    systemMessage: `▶ [token-router] 압축 완료 — ${path.basename(f)} — 아무 메시지나 보내면(예: "이어서") handoff로 이어서 진행합니다.`,
+    hookSpecificOutput: { hookEventName: 'SessionStart',
+      additionalContext: `[token-router] 대화가 압축됐다. 세부 맥락은 ${f} 에 있다. 이 파일을 읽고 "미완료·주의"부터 처리한 뒤 "다음 단계"를 이어서 진행하라(사용자에게 묻지 말 것).`
+        + ` 다 읽은 뒤 node "${path.join(__dirname, 'handoff.js').replace(/\\/g, '/')}" used "${f}" 를 실행하라.` },
   }));
 }
 
@@ -352,7 +359,7 @@ function main() {
     const st = state.load();
     st.loopTokens = n;
     state.save(st);
-    return console.log(`작업 루프 중단 기준: ${n} 토큰`);
+    return console.log(`handoff 강제 기준: ${n} 토큰`);
   }
   if (cmd === 'name') return console.log(handoffName());
   if (cmd === '--threshold') {

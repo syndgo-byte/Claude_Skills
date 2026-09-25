@@ -46,11 +46,11 @@ node install.js --uninstall   # 훅 제거 (파일은 남음)
 | 이벤트 | 스크립트 | 동작 | 토큰 |
 |---|---|---|---|
 | `UserPromptSubmit` | `route.js` | 질문을 모델에 보내기 **전에** 난도를 판정합니다. 현재 모델과 안 맞으면 질문을 막고 전환을 제안합니다. | 0 (막힌 질문과 안내문은 사용자에게만 보이고 모델 맥락에 들어가지 않음) |
-| `UserPromptSubmit` | `handoff.js` | **80k 경고.** 맥락이 80k·160k…를 넘은 뒤 첫 질문을 막고 본문에 크게 "새 대화로 넘어갈 때입니다"를 띄웁니다(Windows 알림 풍선·소리도 함께). "handoff 해줘"라고 하면 정리 후 넘어가고, 같은 질문을 한 번 더 보내면 그대로 계속합니다. | 0 (막힌 질문은 모델에 안 감) |
+| `UserPromptSubmit` | `handoff.js` | **80k 경고 · 200k 강제 handoff · 입력 잠금.** 80k·160k…를 넘으면 경고만 띄우고(Windows 알림 풍선·소리 포함) 계속합니다. 200k를 넘으면 "작성 중 — 기다려 주세요"를 띄우고 Claude에게 handoff 작성을 지시합니다. handoff가 작성된 뒤에는 `/compact`(또는 `/clear`) 전까지 질문을 막습니다. | 경고 0, 강제 지시 1회 약 250토큰, 막힌 질문 0 |
 | `Stop` | `journal.js` | 새 요청이 N턴(기본 5) 쌓였을 때만 일지를 기록합니다. | 0 (출력 없음) |
 | `PreCompact`, `SessionEnd` | `journal.js` | 압축 직전과 세션 종료 때 남은 내용을 기록합니다. | 0 (출력 없음) |
-| `SessionStart` | `handoff.js start` | **이어하기 제안.** 새 대화를 열거나 `/clear`하면 프로젝트 폴더에서 7일 이내 가장 최근 handoff 파일을 찾습니다. Claude가 첫 답변에서 "이전 작업(목표: …)을 이어서 할까요?"라고 묻고, 예라고 하면 그 파일만 읽고 이어갑니다. 다 읽은 handoff는 `.handoff/done/`으로 옮겨 다시 묻지 않습니다. 파일 이름을 입력할 필요가 없습니다. | handoff가 있을 때만 약 80토큰 |
-| `PostToolUse` | `handoff.js guard` | **작업 루프 중단.** 도구를 실행할 때마다 맥락 크기를 확인합니다. 기준(기본 150k)을 넘으면 예외 없이 Claude에게 "하던 편집만 마무리하고 handoff를 쓰고 멈춰라"라고 지시합니다. 150k, 300k처럼 기준을 한 단계 넘을 때마다 한 번씩만 지시합니다. | 경고 1회당 약 150토큰. 기준 미만일 때는 0 |
+| `SessionStart` | `handoff.js start` | **이어하기.** `/compact` 후에는 잠금을 풀고, 이 대화가 쓴 handoff를 Claude에게 알려 묻지 않고 이어가게 합니다. 새 대화나 `/clear` 때는 7일 이내 가장 최근 handoff를 찾아 "이전 작업(목표: …)을 이어서 할까요?"라고 묻습니다. 다 읽은 handoff는 `.handoff/done/`으로 옮깁니다. | handoff가 있을 때만 약 80토큰 |
+| `PostToolUse` | `handoff.js guard` | **작업 루프 중 강제 handoff.** 도구를 실행할 때마다 맥락 크기를 확인해, 200k를 넘으면 "하던 편집만 마무리하고 백업·handoff를 쓰고 멈춰라"라고 지시합니다. handoff 파일이 작성되면 완료 알림을 띄우고 입력을 잠급니다. | 지시 1회당 약 250토큰. 기준 미만일 때는 0 |
 
 **작업 루프 중단이 필요한 이유:** 질문 알림(`UserPromptSubmit`)은 질문을 보낼 때만 실행됩니다. 그래서 질문 하나에서 도구를 수십 번 돌리는 동안에는 알림이 뜨지 않습니다. 실제로 질문 4개에 호출 361번, 맥락 680k까지 불어나 139M 토큰을 쓴 사례가 있었습니다. 1M 맥락 모델은 자동 압축도 늦게 일어나서, 이 훅이 일찍 끊어 주는 역할을 합니다.
 
@@ -78,8 +78,8 @@ node route.js --llm on|off       # 애매할 때 외부 무료 AI에 질문 원�
 
 node handoff.js check            # 가장 최근 대화의 맥락 크기와 권장 여부
 node handoff.js name             # handoff-mmdd-hhmm.md
-node handoff.js --threshold 60000   # 질문 사이 새 세션 권장 기준 (기본 80k)
-node handoff.js --loop 120000       # 작업 루프 중단 기준 (기본 150k)
+node handoff.js --threshold 60000   # 경고 알림 기준 (기본 80k)
+node handoff.js --loop 150000       # 강제 handoff + 입력 잠금 기준 (기본 200k)
 node handoff.js --toast off         # Windows 알림 풍선·소리 끄기 (기본 켜짐)
 node handoff.js where               # 최근 대화의 handoff·백업 위치 (수정한 파일 기준)
 node handoff.js --home E:/handoff   # 파일 수정 없는 대화의 handoff 위치 (기본 D:\Claude_handoff)
@@ -137,9 +137,16 @@ node journal.js now              # 지금 바로 기록
 
 ## handoff 후 흐름
 
-1. handoff 파일이 작성되면 화면에 **"✅ 작성 완료. 새 대화(+ 버튼)를 열거나 /clear 를 입력한 뒤 '이어서 해줘'라고 하세요"**가 뜹니다.
-2. 그 대화에서 질문을 더 보내면 **훅이 막고** 같은 안내를 다시 띄웁니다(토큰 0). `/clear` 같은 명령은 통과합니다.
-3. 새 대화(또는 `/clear` 후)에서 **"📄 이전 작업이 있습니다"**가 뜨면 "이어서 해줘"라고 하세요.
+| 맥락 | 화면 | 동작 |
+|---|---|---|
+| 80k | ⚠ 경고 | 알림(풍선·소리)만. 작업은 계속 |
+| 200k | 📝 "인수인계 작성 중 — 완료 알림까지 기다려 주세요" | Claude가 하던 단위 작업만 마무리 → 백업 → handoff 작성 |
+| 작성 완료 | ✅ 완료 + 🔒 "입력 잠금 — /compact 입력하세요" | 이후 질문은 훅이 막음(토큰 0). `/`로 시작하는 명령은 통과 |
+| `/compact` 후 | ▶ "압축 완료" | 잠금 해제. 아무 메시지나 보내면 Claude가 handoff를 읽고 묻지 않고 이어감 |
+
+- 새 대화를 열지 않아도 됩니다. `/compact` 한 번이면 같은 대화에서 이어집니다. 새 대화나 `/clear`를 원하면 그 뒤 "이어서 해줘"라고 하면 됩니다.
+- 자동 압축은 입력이 있어야 일어나므로, 잠금 상태에서는 `/compact`를 직접 입력해야 합니다.
+- 압축 직후에는 맥락 크기를 0부터 다시 세서, 경고·강제 handoff가 곧바로 다시 걸리지 않습니다.
 
 ## 스냅샷(백업) 규칙
 
