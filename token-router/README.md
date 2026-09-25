@@ -1,169 +1,163 @@
-# token-router 설치·사용
+# token-router
 
-Claude가 읽는 규칙은 `SKILL.md`에 있습니다. 이 README는 설치용 문서라 평소에는 Claude의 토큰을 쓰지 않습니다.
+> Claude Code에서 **긴 대화를 자동으로 끊고 정리해서 다음 세션으로 넘기는** Claude Code 스킬
 
-## 설치 (Claude Code에게 맡기기)
+대화가 길어지면 토큰이 빠르게 줄어듭니다. token-router는 대화 맥락이 커지면:
+- **80k**: 경고만 띄움 (계속 작업 가능)
+- **200k**: 정리 후 handoff 파일 작성 (입력 잠금)
+- **/compact**: 한 번 입력 → 자동으로 이어감 (새 대화 X)
 
-압축을 아무 곳에나 푼 뒤 Claude Code에 이렇게 말하면 됩니다.
+---
 
-> 이 폴더의 README 보고 token-router 스킬 설치해줘
+## 빠른 시작
 
-**Claude Code가 할 일:** 이 폴더에서 아래 명령을 실행합니다. 평소 첫 모델이 Haiku가 아니라면 `--base`를 그 모델로 바꿉니다.
+### 설치 (60초)
 
-```bash
-node install.js --base haiku
-```
-
-`install.js`가 하는 일은 다음과 같습니다.
-1. 파일을 `~/.claude/skills/token-router/`로 복사합니다.
-2. `~/.claude/settings.json`에 훅 6종을 등록합니다.
-   - 기존 설정은 `settings.json.bak-*`로 백업합니다.
-   - 다른 훅은 그대로 두고, 이전 token-router 훅만 교체합니다. 그래서 여러 번 실행해도 중복되지 않습니다.
-   - `settings.json`이 깨져 있으면 아무것도 바꾸지 않고 중단합니다.
-3. 간단한 자가 점검을 합니다.
-
-설치 후 **Claude Code를 다시 시작**해야 훅이 적용됩니다. 그리고 프로젝트마다 `.gitignore`에 `.handoff/`를 추가하세요. 일지에 요청 원문과 실행한 명령이 그대로 남습니다.
+이 폴더를 다운로드한 뒤 Claude Code 터미널에서:
 
 ```bash
-node install.js --dry-run     # 등록될 훅만 보기 (아무것도 안 바꿈)
-node install.js --uninstall   # 훅 제거 (파일은 남음)
+node install.js
 ```
 
-## 파일
+또는 Claude Code에 말하면:
 
-| 파일 | 역할 |
-|---|---|
-| `SKILL.md` | 작업 규칙: 계획·모델 배정, 매 답변 세션 판단, handoff 양식, 엑셀은 스크립트로 처리 |
-| `route.js` | 작업 → 모델 + effort 판정 (로컬 규칙). 훅: 작업과 모델이 안 맞으면 전송 전에 전환 제안 |
-| `handoff.js` | 대화 맥락 크기 측정 → 새 세션 권장, 새 대화 시작 시 "이어서 할까요?" 제안 |
-| `journal.js` | N턴마다 작업 일지를 `.handoff/journal-*.md`에 자동 기록 |
-| `snapshot.js` | handoff 직전 바뀐 파일을 프로젝트의 `backup-claude/`에 압축 백업, `--restore`로 복원 (git 불필요, 5GB 이하 유지) |
-| `state.js` | 설정·기록 (`~/.claude/token-router/`) |
-| `install.js` | 설치·업데이트·제거 |
+> 이 폴더의 README 보고 token-router 설치해줘
 
-## 훅이 하는 일
+설치 후 **VSCode를 다시 시작**하세요.
 
-| 이벤트 | 스크립트 | 동작 | 토큰 |
-|---|---|---|---|
-| `UserPromptSubmit` | `route.js` | 질문을 모델에 보내기 **전에** 난도를 판정합니다. 현재 모델과 안 맞으면 질문을 막고 전환을 제안합니다. | 0 (막힌 질문과 안내문은 사용자에게만 보이고 모델 맥락에 들어가지 않음) |
-| `UserPromptSubmit` | `handoff.js` | **80k 경고 · 200k 강제 handoff · 입력 잠금.** 80k·160k…를 넘으면 경고만 띄우고(Windows 알림 풍선·소리 포함) 계속합니다. 200k를 넘으면 "작성 중 — 기다려 주세요"를 띄우고 Claude에게 handoff 작성을 지시합니다. handoff가 작성된 뒤에는 `/compact`(또는 `/clear`) 전까지 질문을 막습니다. | 경고 0, 강제 지시 1회 약 250토큰, 막힌 질문 0 |
-| `Stop` | `journal.js` | 새 요청이 N턴(기본 5) 쌓였을 때만 일지를 기록합니다. | 0 (출력 없음) |
-| `PreCompact`, `SessionEnd` | `journal.js` | 압축 직전과 세션 종료 때 남은 내용을 기록합니다. | 0 (출력 없음) |
-| `SessionStart` | `handoff.js start` | **이어하기.** `/compact` 후에는 잠금을 풀고, 이 대화가 쓴 handoff를 Claude에게 알려 묻지 않고 이어가게 합니다. 새 대화나 `/clear` 때는 7일 이내 가장 최근 handoff를 찾아 "이전 작업(목표: …)을 이어서 할까요?"라고 묻습니다. 다 읽은 handoff는 `.handoff/done/`으로 옮깁니다. | handoff가 있을 때만 약 80토큰 |
-| `PostToolUse` | `handoff.js guard` | **작업 루프 중 강제 handoff.** 도구를 실행할 때마다 맥락 크기를 확인해, 200k를 넘으면 "하던 편집만 마무리하고 백업·handoff를 쓰고 멈춰라"라고 지시합니다. handoff 파일이 작성되면 완료 알림을 띄우고 입력을 잠급니다. | 지시 1회당 약 250토큰. 기준 미만일 때는 0 |
+### 사용 예시
 
-**작업 루프 중단이 필요한 이유:** 질문 알림(`UserPromptSubmit`)은 질문을 보낼 때만 실행됩니다. 그래서 질문 하나에서 도구를 수십 번 돌리는 동안에는 알림이 뜨지 않습니다. 실제로 질문 4개에 호출 361번, 맥락 680k까지 불어나 139M 토큰을 쓴 사례가 있었습니다. 1M 맥락 모델은 자동 압축도 늦게 일어나서, 이 훅이 일찍 끊어 주는 역할을 합니다.
+```
+사용자: "이 엑셀 20개 읽어서..."
+↓ (작업 진행 중)
+↓ (맥락 80k 도달)
+Claude: ⚠ 경고 (작업은 계속)
+↓
+↓ (맥락 200k 도달)
+Claude: 📝 "인수인계 작성 중..."
+Claude: (백업 + handoff 파일 작성)
+Claude: ✅ "완료. /compact 입력하세요"
+사용자: ㄱㄱ  ← 또는 /c, /ㄱ, /compact
+↓
+Claude: ▶ "압축 완료, 이어서 진행합니다"
+↓
+사용자: "그 다음은..."
+Claude: (handoff 읽고 자동으로 이어감)
+```
 
-### 모델 전환 제안
+---
 
-- **상향 (예: Haiku → Opus)**: 설계, 원인 분석, 보안 같은 opus급 작업이 들어오면 제안합니다. 맥락이 50k를 넘었으면 모델을 바꾸는 대신 handoff 후 새 세션을 권합니다.
-- **하향 (예: Opus → Haiku)**: 조회나 요약처럼 확실히 가벼운 작업이고, 두 단계 아래 모델로 충분하며, **맥락이 30k 이하일 때만** 제안합니다.
-  - 이렇게 조건을 둔 이유: 캐시는 모델별로 따로 쌓입니다. 그래서 싼 모델로 바꾸면 첫 답변에서 대화 전체를 캐시 없이 다시 읽습니다. 맥락이 100k라면 그 한 번이 Opus가 캐시에서 읽는 비용보다 비쌉니다.
-  - Haiku는 맥락 창이 200K라서, 맥락이 150k를 넘으면 Haiku로 가라는 제안은 하지 않습니다.
-- **전환 방법**: `/model`에서 권장 모델을 고른 뒤 **같은 질문을 그대로** 다시 보냅니다.
-- **그대로 진행**: 같은 질문을 10분 안에 한 번 더 보냅니다. 문장을 바꾸면 다시 판정합니다.
-- **현재 모델 판단**: 마지막 답변 기록으로 판단합니다. 새 세션의 첫 질문에서는 `--base` 모델로 가정합니다.
+## 작동 방식
 
-## 명령
+| 단계 | 맥락 크기 | 무엇이 일어나는가 |
+|---|---|---|
+| **경고** | 80k 초과 | ⚠ Windows 풍선·소리 알림. 작업은 계속 |
+| **강제 작성** | 200k 초과 | 📝 Claude가 하던 작업만 마무리 → 파일 백업 → handoff 작성 |
+| **입력 잠금** | handoff 완료 후 | 🔒 이후 질문을 모두 막음. `/compact`(또는 `/c`, `/ㄱ`, `ㄱㄱ`) 입력 대기 |
+| **압축 후 이어감** | /compact 입력 | ▶ 압축 완료 → 잠금 해제 → handoff 자동 읽고 진행 |
+
+**핵심:**
+- 새 대화를 열 필요 없음 (같은 대화에서 계속)
+- `/compact` 한 번만 입력하면 자동으로 이어남
+- 백업은 자동 (git 없이도 파일 복원 가능)
+
+---
+
+## 기본 명령
 
 ```bash
-node route.js "엑셀 20개 읽어서 분류별 합계 스크립트 만들어줘"   # {"route":"sonnet","effort":"medium",...}
-node route.js --stats            # 판정 통계와 현재 설정
-node route.js --on | --off       # 전체 켜기/끄기
-node route.js --ask-at opus      # 이 등급 이상 작업일 때만 상향 제안 (sonnet|opus|fable, 기본 opus)
-node route.js --down on|off      # 하향 제안 (기본 켜짐)
-node route.js --base haiku       # 새 세션을 보통 어떤 모델로 시작하는지
-node route.js --fable on|off     # Fable 배정 허용 (기본 금지)
-node route.js --llm on|off       # 애매할 때 외부 무료 AI에 질문 원문 전송 (기본 꺼짐)
+# 경고 기준 변경 (기본 80k)
+node handoff.js --threshold 60000
 
-node handoff.js check            # 가장 최근 대화의 맥락 크기와 권장 여부
-node handoff.js name             # handoff-mmdd-hhmm.md
-node handoff.js --threshold 60000   # 경고 알림 기준 (기본 80k)
-node handoff.js --loop 150000       # 강제 handoff + 입력 잠금 기준 (기본 200k)
-node handoff.js --toast off         # Windows 알림 풍선·소리 끄기 (기본 켜짐)
-node handoff.js where               # 최근 대화의 handoff·백업 위치 (수정한 파일 기준)
-node handoff.js --home E:/handoff   # 파일 수정 없는 대화의 handoff 위치 (기본 D:\Claude_handoff)
+# 강제 작성 기준 변경 (기본 200k)
+node handoff.js --loop 150000
 
-node snapshot.js                    # 지금 폴더에서 바뀐 파일 백업
-node snapshot.js --list             # 이 프로젝트의 백업 목록
-node snapshot.js --restore latest data/1월.xlsx     # 파일 하나를 최근 백업으로 복원
-node snapshot.js --restore 20260924-143111         # 그 시점 상태로 백업된 파일 전부 복원
-node snapshot.js --limits 5 200     # 프로젝트당 GB · 파일 하나 MB 한도
+# 가장 최근 대화의 크기 확인
+node handoff.js check
 
-node journal.js --every 3        # 일지 기록 주기 (기본 5턴)
-node journal.js now              # 지금 바로 기록
+# Windows 알림 끄기
+node handoff.js --toast off
 ```
 
-## 수동 설치 (install.js를 못 쓸 때)
+---
 
-파일을 `~/.claude/skills/token-router/`에 복사하고 `~/.claude/settings.json`에 아래를 합칩니다. 경로는 본인 PC에 맞게 바꾸세요.
+## 설치 자세히
+
+<details>
+<summary><strong>Claude Code에게 맡기기 (권장)</strong></summary>
+
+이 폴더에서:
+
+```bash
+node install.js
+```
+
+`install.js`가 하는 일:
+1. 파일을 `~/.claude/skills/token-router/`에 복사
+2. `~/.claude/settings.json`에 훅 6개 등록
+3. 기존 token-router 훅은 자동으로 교체 (중복 없음)
+4. 자가 점검 실행
+
+옵션:
+```bash
+node install.js --dry-run      # 등록될 훅만 보기
+node install.js --uninstall    # 훅 제거 (파일은 남음)
+```
+
+</details>
+
+<details>
+<summary><strong>수동 설치</strong></summary>
+
+파일을 `~/.claude/skills/token-router/`에 복사한 뒤 `~/.claude/settings.json`에 아래 내용을 합칩니다. (경로는 본인 PC에 맞게)
 
 ```json
 {
   "hooks": {
     "UserPromptSubmit": [
       { "hooks": [
-        { "type": "command", "command": "node \"C:/Users/나/.claude/skills/token-router/route.js\" hook" },
-        { "type": "command", "command": "node \"C:/Users/나/.claude/skills/token-router/handoff.js\" hook" }
+        { "type": "command", "command": "node \"C:/Users/이름/.claude/skills/token-router/handoff.js\" hook" }
       ] }
     ],
-    "Stop": [
-      { "hooks": [ { "type": "command", "command": "node \"C:/Users/나/.claude/skills/token-router/journal.js\" hook" } ] }
-    ],
-    "PreCompact": [
-      { "hooks": [ { "type": "command", "command": "node \"C:/Users/나/.claude/skills/token-router/journal.js\" hook" } ] }
-    ],
-    "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "node \"C:/Users/나/.claude/skills/token-router/journal.js\" hook" } ] }
-    ],
     "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "node \"C:/Users/나/.claude/skills/token-router/handoff.js\" start" } ] }
+      { "hooks": [ { "type": "command", "command": "node \"C:/Users/이름/.claude/skills/token-router/handoff.js\" start" } ] }
     ],
     "PostToolUse": [
-      { "matcher": "*", "hooks": [ { "type": "command", "command": "node \"C:/Users/나/.claude/skills/token-router/handoff.js\" guard" } ] }
+      { "matcher": "*", "hooks": [ { "type": "command", "command": "node \"C:/Users/이름/.claude/skills/token-router/handoff.js\" guard" } ] }
     ]
   }
 }
 ```
 
+</details>
+
+---
+
+## 파일
+
+| 파일 | 역할 |
+|---|---|
+| `SKILL.md` | Claude가 읽는 규칙 (작업 계획, handoff 양식, 단계별 배정) |
+| `handoff.js` | 맥락 크기 측정 + 80k/200k 알림 + /compact 후 이어가기 |
+| `snapshot.js` | handoff 직전 변경된 파일 자동 백업 |
+| `journal.js` | 작업 일지 자동 기록 |
+| `install.js` | 설치·업데이트·제거 |
+
+---
+
 ## handoff 저장 위치
 
-기준은 대화를 연 위치가 아니라 **그 대화에서 수정한 파일**입니다.
+- **파일을 수정한 대화**: 그 프로젝트 폴더에 저장
+- **명령만 친 대화**: `D:\Claude_handoff`에 저장 (변경 가능: `node handoff.js --home <경로>`)
 
-- **파일을 수정한 대화** (예: `.py` 수정): 그 파일이 속한 프로젝트 폴더(`.git`·`pyproject.toml`·`package.json`·`requirements.txt` 등이 있는 가장 가까운 상위 폴더, 없으면 파일이 있는 폴더)에 handoff·백업·일지를 둡니다.
-- **파일 수정 없이 명령만 친 대화**: handoff·일지는 **`D:\Claude_handoff`**에 두고 백업은 하지 않습니다. 위치는 `node handoff.js --home <폴더>`로 바꿀 수 있습니다.
-- `~/.claude` 설정·임시 폴더·handoff 파일을 고친 것은 프로젝트 작업으로 치지 않습니다.
-- handoff가 작성되면 위치를 기록해 두므로, 새 대화를 어느 폴더에서 열어도 "이전 작업이 있습니다"를 띄웁니다.
-
-## handoff 후 흐름
-
-| 맥락 | 화면 | 동작 |
-|---|---|---|
-| 80k | ⚠ 경고 | 알림(풍선·소리)만. 작업은 계속 |
-| 200k | 📝 "인수인계 작성 중 — 완료 알림까지 기다려 주세요" | Claude가 하던 단위 작업만 마무리 → 백업 → handoff 작성 |
-| 작성 완료 | ✅ 완료 + 🔒 "입력 잠금 — /compact 입력하세요" | 이후 질문은 훅이 막음(토큰 0). `/c`, `/ㄱ`, `ㄱㄱ` 등으로도 해제 가능 |
-| 압축 명령 | `/compact` 또는 `/c`, `/ㄱ`, `ㄱㄱ` 등 | 아무 것이나 입력 (예: "ㄱㄱ", "ㄱ", "/c") |
-| 압축 후 | ▶ "압축 완료" | 잠금 해제. 아무 메시지나 보내면 Claude가 handoff를 읽고 묻지 않고 이어감 |
-
-- 새 대화를 열지 않아도 됩니다. `/compact`(또는 `/c`, `/ㄱ`, `ㄱㄱ`) 한 번이면 같은 대화에서 이어집니다. 새 대화나 `/clear`를 원하면 그 뒤 "이어서 해줘"라고 하면 됩니다.
-- 자동 압축은 입력이 있어야 일어나므로, 잠금 상태에서는 명령을 직접 입력해야 합니다.
-- 압축 직후에는 맥락 크기를 0부터 다시 세서, 경고·강제 handoff가 곧바로 다시 걸리지 않습니다.
-
-## 스냅샷(백업) 규칙
-
-handoff 직전(맥락 초과 경고, 새 세션 권장)에 Claude가 `snapshot.js`를 실행합니다. git은 쓰지 않습니다.
-
-- **저장 위치**: 각 프로젝트 폴더 안 `backup-claude\<날짜-시각>\<원래 경로>.gz`
-- **압축 저장**: 백업은 `정산.xlsx.gz`처럼 압축돼 있습니다. 그래서 `*.xlsx`·`*.py`를 찾는 스크립트나 Claude의 검색에 **백업 사본이 섞이지 않고**, 용량도 줄어듭니다. 폴더 안 `.ignore`로 Claude Code 검색에서도 빠집니다.
-- **무엇을**: 첫 백업은 프로젝트 전체, 이후에는 지난 백업 이후 바뀐 파일만 저장합니다.
-- **제외**: `.env`·키·인증서·`credentials`/`secrets` 파일, 임시 파일(`~$*`, `.tmp`, `.log`), 200MB 넘는 파일, `node_modules`·`.git`·가상환경·빌드 폴더·`.handoff/`
-- **용량**: `backup-claude`를 **프로젝트마다 5GB 이하로 유지**합니다(압축 후 크기 기준). 넘으면 오래된 버전부터 지우지만 **파일마다 가장 최근 사본은 지우지 않습니다.**
-- **복원**: `node snapshot.js --restore <날짜-시각|latest> [파일]`. 각 파일을 그 시점 이전의 가장 최근 백업으로 되돌립니다. **복원 직전 상태를 먼저 백업**하므로 복원도 되돌릴 수 있습니다. 되돌릴지는 사용자가 정합니다.
-- `backup-claude` 폴더를 통째로 지워도 프로젝트에는 영향이 없습니다.
-- Claude가 편집 도구로 고친 파일만 되돌릴 때는 Claude Code의 `/rewind`가 더 간단합니다. 백업은 스크립트나 사람이 바꾼 파일까지 보관합니다.
+---
 
 ## 알려진 한계
 
-- 판정은 키워드 규칙이라 가끔 틀립니다. 틀리면 같은 질문을 한 번 더 보내서 넘기면 됩니다.
-- 훅은 모델을 **직접 바꾸지 못합니다.** 전환은 `/model`로 사람이 합니다.
-- Windows에서는 사용자 폴더에 한글이 들어 있으면 훅 실행에 문제가 생길 수 있습니다. 그럴 때는 `settings.json`의 경로를 `~/.claude/skills/token-router/...` 형태로 바꿔 보세요.
+- Windows 사용자명에 한글이 있으면 훅이 문제가 생길 수 있습니다. 그럴 때는 settings.json의 경로를 `~/.claude/skills/token-router/...` 형태로 바꿔 보세요.
+
+---
+
+## 자세한 내용
+
+더 자세한 규칙과 설정은 [`SKILL.md`](SKILL.md)를 읽으세요. Claude가 작업할 때 따르는 규칙들입니다.
