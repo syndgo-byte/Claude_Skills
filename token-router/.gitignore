@@ -3,3 +3,6 @@ dist/
 *.log
 .DS_Store
 token-router-vscode/
+extension/.handoff/
+extension/resources/
+extension/handoff-*.md

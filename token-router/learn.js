@@ -30,7 +30,8 @@ function promptText(msg) {
     if (c.some((b) => b.type === 'tool_result')) return '';
     text = c.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
   }
-  text = text.replace(/<([a-z_-]+)[^>]*>[\s\S]*?<\/\1>/gi, '').trim();
+  text = text.replace(/<([a-z_-]+)[^>]*>[\s\S]*?<\/\1>/gi, '');
+  text = text.replace(/^\[Image:[^\]]*\]\s*/gm, '').trim();
   if (!text || text.startsWith('/') || text.startsWith('<')) return '';
   return text;
 }
