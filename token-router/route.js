@@ -229,6 +229,21 @@ async function main() {
   if (args[0] === '--down') return toggle('down', args[1] !== 'off', '하향 전환 제안');
   if (args[0] === '--stats') return console.log(state.stats());
   if (args[0] === 'hook') return hook();
+  if (args[0] === 'usage') {
+    const handoff = require('./handoff');
+    const transcript = args[1] || handoff.latestTranscript();
+    if (!transcript) return console.log('토큰 사용량 측정 불가 (transcript 없음)');
+    const m = handoff.measure(transcript);
+    if (!m) return console.log('토큰 사용량 측정 실패');
+    const threshold = (state.load().threshold || 80000);
+    const loop = (state.load().loop || 200000);
+    const k = Math.round(m.context / 1000);
+    const thresholdK = Math.round(threshold / 1000);
+    const loopK = Math.round(loop / 1000);
+    const bar = m.context >= loop ? '🔴' : m.context >= threshold ? '🟡' : '🟢';
+    console.log(`${bar} 토큰: ${k}k / ${thresholdK}k(⚠️) / ${loopK}k(🔒)`);
+    return;
+  }
   if (args[0] === '--ask-at') {
     if (!['sonnet', 'opus', 'fable'].includes(args[1])) { console.error('usage: node route.js --ask-at sonnet|opus|fable'); process.exit(2); }
     const st = state.load();

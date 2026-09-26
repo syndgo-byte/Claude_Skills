@@ -1,0 +1,50 @@
+{
+  "name": "token-router-indicator",
+  "displayName": "Token Router Indicator",
+  "description": "Real-time context token usage indicator for Claude Code",
+  "version": "1.0.0",
+  "publisher": "token-router",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "token-router-container",
+          "title": "Token Usage",
+          "icon": "resources/token-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "token-router-container": [
+        {
+          "id": "token-router-panel",
+          "name": "Context Usage",
+          "type": "webview"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.0.0"
+  }
+}
