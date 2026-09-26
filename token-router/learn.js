@@ -75,6 +75,7 @@ function recentFiles(n) {
 async function learn(sessions) {
   const under = [];
   const over = [];
+  const seen = new Set();
   let total = 0;
   for (const file of recentFiles(sessions)) {
     const ts = turns(file);
@@ -85,8 +86,13 @@ async function learn(sessions) {
       const d = await decide(t.prompt);
       const row = { prompt: t.prompt.slice(0, 120), used: TIERS[used], router: d.route, why: d.why };
       const next = ts[i + 1];
-      if (next && COMPLAINT.test(next.prompt.trim())) under.push({ ...row, complaint: next.prompt.slice(0, 60) });
-      else if (used >= 2 && t.tools === 0 && t.chars < OVER_MAX_CHARS) over.push({ ...row, chars: t.chars });
+      if (next && COMPLAINT.test(next.prompt.trim())) {
+        const key = `${t.prompt}|${next.prompt}`;
+        if (!seen.has(key)) { under.push({ ...row, complaint: next.prompt.slice(0, 60) }); seen.add(key); }
+      } else if (used >= 2 && t.tools === 0 && t.chars < OVER_MAX_CHARS) {
+        const key = `${t.prompt}|over`;
+        if (!seen.has(key)) { over.push({ ...row, chars: t.chars }); seen.add(key); }
+      }
     }
   }
   const report = { at: new Date().toISOString(), sessions, turns: total, under, over };
