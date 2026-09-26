@@ -16,7 +16,7 @@ const { execFileSync } = require('child_process');
 const CLAUDE = path.join(os.homedir(), '.claude');
 const TARGET = path.join(CLAUDE, 'skills', 'token-router');
 const SETTINGS = path.join(CLAUDE, 'settings.json');
-const FILES = ['SKILL.md', 'README.md', 'install.js', 'route.js', 'handoff.js', 'journal.js', 'snapshot.js', 'state.js'];
+const FILES = ['SKILL.md', 'README.md', 'install.js', 'route.js', 'handoff.js', 'context-monitor.js', 'journal.js', 'snapshot.js', 'state.js'];
 
 // Forward slashes work in both cmd and Git Bash, which is what hooks run under on Windows.
 const cmd = (script, sub = 'hook') => `node "${path.join(TARGET, script).replace(/\\/g, '/')}" ${sub}`;
