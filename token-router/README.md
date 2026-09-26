@@ -12,6 +12,8 @@
 
 ### 설치 (60초)
 
+#### 1️⃣ 스킬 설치 (필수)
+
 이 폴더를 다운로드한 뒤 Claude Code 터미널에서:
 
 ```bash
@@ -22,7 +24,23 @@ node install.js
 
 > 이 폴더의 README 보고 token-router 설치해줘
 
-설치 후 **VSCode를 다시 시작**하세요.
+**설치 후 Claude Code를 다시 시작하세요.** 이 단계만 해도 handoff, 모델 자동 선택, 경고 알림이 모두 작동합니다.
+
+#### 2️⃣ VSCode 익스텐션 설치 (선택, VSCode 사용자만)
+
+VSCode에서 탭별 context를 실시간으로 보고 싶으면:
+
+```bash
+cd extension
+npm install
+npm run compile
+cp -r dist "$USERPROFILE/.vscode/extensions/token-router-indicator/"
+# macOS/Linux: cp -r dist ~/.vscode/extensions/token-router-indicator/
+```
+
+**VSCode를 다시 시작한 뒤** Activity Bar(왼쪽)에 원형 아이콘이 나타나고, 패널에서 모든 열려 있는 Claude 탭의 context를 봅니다.
+
+**VSCode를 안 쓰면?** 스킬만 설치하면 됩니다. 터미널 배너에서 맥락과 추천 모델을 볼 수 있습니다.
 
 ### 사용 예시
 
