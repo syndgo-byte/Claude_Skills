@@ -215,6 +215,91 @@ token-router는 작업 난도에 따라 자동으로 모델을 제안합니다.
 
 ---
 
+## 🤖 대화 기록에서 배우기 (learn.js)
+
+token-router는 과거 대화를 분석해서 **모델 라우팅을 자동으로 개선**합니다.
+
+### 작동 방식
+
+**매 세션마다 자동 실행** (SessionStart 훅, 하루 1회만):
+1. 최근 30개 대화 분석
+2. 사용자가 "아니", "엉뚱", "틀렸" 등으로 불만 표현한 경우 감지
+3. 해당 신호(모델)가 약했다고 판단 → **가중치 자동 감소**
+4. route.test.js로 검증 (실패시 자동 롤백)
+
+**예시:**
+```
+🤖 신호 분석: sonnet(19개 불만), opus(1개)
+✓ sonnet: 3 → 2 (수정 예정)
+✅ 자동 반영: sonnet 신호 약화 (3 → 2)
+```
+
+### 보고서 확인
+
+```bash
+# 가장 최근 분석 결과 보기
+cat ~/.claude/token-router/learn-report.json
+
+# 수동으로 분석 실행
+node learn.js 30
+```
+
+### 보고서 구조
+
+```json
+{
+  "under": [
+    {
+      "prompt": "버그 수정 하는데 소넷을 쓴다고?",
+      "used": "haiku",
+      "router": "opus",
+      "complaint": "아니 하이쿠랑 소넷 사이가 아니라..."
+    }
+  ],
+  "over": [
+    {
+      "prompt": "이제 나온다",
+      "used": "opus",
+      "router": "sonnet",
+      "chars": 67
+    }
+  ]
+}
+```
+
+- **under**: 모델이 약했을 때 (다음 메시지가 불만)
+- **over**: 더 싼 모델로 충분했을 때 (Opus 이상이 짧게 답함)
+
+### 자동 조정 조건
+
+신호가 가중치를 줄이려면:
+- ✅ 같은 신호에 대해 **3건 이상 불만**
+- ✅ **route.test.js** 검증 통과
+- ✅ 가중치 > 1 (최소값 1 유지)
+
+조건 미충족시 → 보고서만 생성, 조정 안 함
+
+### 수동 조정
+
+자동 조정에 동의하지 않으면 route.js를 직접 수정:
+
+```javascript
+// route.js의 SIGNALS 객체
+sonnet: [
+  [/구현해|추가해|만들어/, 3],  // ← 이 가중치를 변경
+  ...
+]
+```
+
+수정 후:
+```bash
+node route.test.js  # 검증
+git add route.js && git commit -m "adjust signal"
+git push
+```
+
+---
+
 ## 기본 명령
 
 ```bash
