@@ -63,6 +63,73 @@ Claude: (handoff 읽고 자동으로 이어감)
 
 ---
 
+## 실시간 토큰 모니터링 (VSCode Extension)
+
+### 기능
+
+VSCode의 **Activity Bar(왼쪽 아이콘 영역)**에 토큰 사용량을 **실시간으로 표시**합니다:
+
+```
+🟢 75.9k (47%)     ← 정상 범위
+🟡 95.2k (59%)     ← 경고 수준 (70k+)
+🟠 105.3k (66%)    ← 강제 작성 수준 (80k+)
+🔴 165.2k (103%)   ← 루프 한계 (160k+)
+```
+
+**특징:**
+- ✅ 대화 마다 자동 업데이트
+- ✅ 여러 탭/세션 동시 지원
+- ✅ 모델별 다른 임계치 (Haiku 160k, Sonnet/Opus 150k)
+- ✅ 클릭하면 상세 정보 표시
+
+### 작동 원리
+
+```
+1. 사용자가 질문 입력 (어느 탭이든 상관없음)
+   ↓
+2. Claude Code의 UserPromptSubmit hook 실행
+   ↓
+3. context-monitor.js --terminal 실행
+   ├─ 최신 transcript 파일 찾기
+   ├─ 토큰 사용량 계산
+   ├─ ~/.claude/context-monitor.json 생성
+   └─ 터미널에 색상 배너 출력
+   ↓
+4. VSCode Extension이 context-monitor.json 감시
+   ├─ 파일 변경 감지
+   └─ Activity Bar 아이콘 색상 즉시 업데이트
+```
+
+### 여러 탭에서의 동작
+
+각 Claude Code 세션/탭마다 독립적으로 작동합니다:
+
+```
+탭 A (토큰 50k)         탭 B (토큰 80k)         탭 C (토큰 120k)
+    🟢                       🟠                       🟠
+
+↓ 탭 B에서 질문 입력
+      Activity Bar: 🟠 80.5k (50%) ← 탭 B 데이터로 업데이트
+
+↓ 탭 C로 이동해서 질문 입력
+      Activity Bar: 🟠 125.3k (80%) ← 탭 C 데이터로 업데이트
+```
+
+**결과:**
+- 활성화된 탭의 토큰 사용량만 표시
+- 각 탭은 완전히 독립적
+- 다른 탭에는 영향 없음
+
+### 파일 위치
+
+| 파일 | 위치 |
+|---|---|
+| Extension | `~/.vscode/extensions/token-router-indicator/` |
+| 토큰 데이터 | `~/.claude/context-monitor.json` |
+| Hook 설정 | `~/.claude/settings.json` (UserPromptSubmit) |
+
+---
+
 ## 모델 전환
 
 token-router는 작업 난도에 따라 자동으로 모델을 제안합니다.
