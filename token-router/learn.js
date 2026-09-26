@@ -3,8 +3,7 @@
 // Learns from past conversations where routing likely went wrong, with no feedback input:
 //   - under: the user's next message complains ("아니", "엉뚱", "그게 아니라") -> model may have been too weak
 //   - over:  an expensive model answered briefly with no tool calls -> a cheaper one would likely do
-// Writes ~/.claude/token-router/learn-report.json. Never edits route.js; signals change only
-// after a person reviews the report and route.test.js passes.
+// Writes ~/.claude/token-router/learn-report.json with analysis data (no auto-updates yet).
 //
 //   node learn.js [sessions=30]   -> report to stdout and file
 //   node learn.js start           -> SessionStart hook: refreshes the report at most once a day, silent
@@ -119,5 +118,8 @@ function print(r) {
     try { await learn(30); } catch { }
     return;
   }
-  print(await learn(parseInt(process.argv[2], 10) || 30));
+  const r = await learn(parseInt(process.argv[2], 10) || 30);
+  print(r);
+  // Auto-update disabled for now; suggestions are logged but not applied.
+  // Future: implement safe AST-based route.js updates with per-turn debouncing.
 })();
