@@ -10,6 +10,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execSync } = require('child_process');
 const { decide } = require('./route');
 
 const PROJECTS = path.join(os.homedir(), '.claude', 'projects');
@@ -109,6 +110,63 @@ function print(r) {
   console.log(`\n보고서: ${REPORT}`);
 }
 
+function applyUpdates(report) {
+  const signal2count = {};
+
+  for (const c of report.under) {
+    const sig = c.router;
+    signal2count[sig] = (signal2count[sig] || 0) + 1;
+  }
+
+  const updates = [];
+  for (const [sig, count] of Object.entries(signal2count)) {
+    if (count >= 3) updates.push(sig);
+  }
+
+  if (!updates.length) return [];
+
+  let routeFile = path.join(__dirname, 'route.js');
+  if (!fs.existsSync(routeFile)) routeFile = path.join(os.homedir(), '.claude', 'skills', 'token-router', 'route.js');
+  if (!fs.existsSync(routeFile)) return [];
+
+  const original = fs.readFileSync(routeFile, 'utf8');
+  let modified = original;
+  const changes = [];
+
+  for (const sig of updates) {
+    const re = new RegExp(`${sig}:\\s*\\[\\s*\\[/[^\\]]*?,\\s*(\\d+)\\]`);
+    const m = modified.match(re);
+    if (!m) continue;
+
+    const oldW = parseInt(m[1], 10);
+    const newW = Math.max(1, oldW - 1);
+    if (oldW === newW) continue;
+
+    modified = modified.replace(m[0], m[0].replace(`, ${oldW}]`, `, ${newW}]`));
+    changes.push({ signal: sig, from: oldW, to: newW });
+  }
+
+  if (!changes.length) return [];
+
+  fs.writeFileSync(routeFile, modified, 'utf8');
+
+  try {
+    // Try both possible locations for route.test.js
+    let testFile = path.join(path.dirname(routeFile), 'route.test.js');
+    if (!fs.existsSync(testFile)) testFile = path.join(__dirname, 'route.test.js');
+    if (!fs.existsSync(testFile)) {
+      fs.writeFileSync(routeFile, original, 'utf8');
+      return [];
+    }
+    execSync(`node "${testFile}"`, { stdio: 'pipe', cwd: path.dirname(testFile) });
+    console.log(`\n✅ 자동 반영: ${changes.map(c => `${c.signal}(${c.from}→${c.to})`).join(', ')}`);
+    return changes;
+  } catch (e) {
+    fs.writeFileSync(routeFile, original, 'utf8');
+    return [];
+  }
+}
+
 (async () => {
   if (process.argv[2] === 'start') {
     try {
@@ -120,6 +178,5 @@ function print(r) {
   }
   const r = await learn(parseInt(process.argv[2], 10) || 30);
   print(r);
-  // Auto-update disabled for now; suggestions are logged but not applied.
-  // Future: implement safe AST-based route.js updates with per-turn debouncing.
+  applyUpdates(r);
 })();
