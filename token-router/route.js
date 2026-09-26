@@ -31,7 +31,7 @@ const SIGNALS = {
   // Korean has no word boundaries, so match request forms ("구현해") and skip
   // descriptive ones ("구현된", "수정본") that show up in lookup questions.
   sonnet: [
-    [/구현(?!된|되|돼)|추가해|만들어|엔드포인트|컴포넌트|테스트\s*(작성|추가|짜|만들)|타입\s*힌트|일괄|변환해|리팩터|정리해|개선해|최적화해|배포해/, 1],
+    [/구현(?!된|되|돼)|추가해|만들어|엔드포인트|컴포넌트|테스트\s*(작성|추가|짜|만들)|타입\s*힌트|일괄|변환해|리팩터|정리해|개선해|최적화해|배포해/, 2],
     [/\b(implement|add|build|feature|endpoint|component|update|tests?|type hints?|convert|bulk|refactor|clean ?up|improve|optimi[sz]e|deploy)\b/i, 3],
     // Plain edits: a hint only, so "오타 수정" stays on Haiku and "버그 고쳐" goes to Opus.
     [/수정(?!본|된|사항)|고쳐|\bfix\b/i, 1],
