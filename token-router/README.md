@@ -149,26 +149,29 @@ token-router는 작업 난도에 따라 자동으로 모델을 제안합니다.
 ### 모델별 신호 (const SIGNALS)
 
 **🟢 Haiku** (기본 모델 - 빠르고 저렴)
-- 검색, 조회 (강): "어디", "있어", "검색", "목록", "나열", "몇 개"
-- 읽기, 요약 (중): "찾아", "읽어", "요약", "분류", "설명해"
-- 기본 편집 (중): "번역", "오타", "주석"
-- 영어: "where is", "search", "grep", "list", "locate", "count", "translate", "what does", "look up"
+- 검색, 조회 (강): "어디 있어", "어디서 쓰여", "검색", "목록", "나열", "몇 개", "알려줘", "보여줘"
+- 읽기, 요약 (약, 다른 신호 없을 때만): "찾아", "읽어", "요약", "분류", "설명해"
+- 기본 편집 (강): "번역", "오타", "주석 달아", "이름 바꿔", "포맷"
+- 영어: "where is", "search", "grep", "list", "locate", "count", "translate", "what does", "look up", "show me"
 
 **🟡 Sonnet** (균형잡힌 모델)
-- 구현, 기능 (강): "구현", "추가해", "만들어", "기능", "엔드포인트", "컴포넌트", "화면"
-- 테스트, 변환 (강): "테스트", "타입 힌트", "변환", "리팩터", "정리해"
-- 개선, 최적화 (강): "개선", "최적화", "배포", "일괄"
+- 구현 (강): "구현해", "추가해", "만들어", "엔드포인트", "컴포넌트"
+- 테스트, 변환 (강): "테스트 작성", "타입 힌트", "변환해", "리팩터", "정리해"
+- 개선, 최적화 (강): "개선해", "최적화해", "배포해", "일괄"
+- 단순 수정 (힌트, 1점): "수정", "고쳐", "fix" — 혼자 있으면 Sonnet, "오타"와 함께면 Haiku, "버그"와 함께면 Opus
 - 데이터 작업 (중): "스크립트", "엑셀", "시트", "CSV", "파싱", "집계", "계산"
 - 영어: "implement", "add", "build", "feature", "endpoint", "component", "update", "tests", "type hints", "convert", "refactor", "clean up", "improve", "optimize", "deploy", "script", "excel", "parse", "aggregate"
 - **길이 기반**: 300-500자 또는 3개 부분 요청
 
 **🔴 Opus** (강력한 모델)
-- 버그/디버깅 (강): "버그", "고쳐", "수정", "왜 안 돼", "원인", "근본", "디버깅"
-- 설계, 아키텍처 (강): "설계", "아키텍처", "구조", "트레이드오프", "결정", "방식", "전략", "계획"
+- 버그/디버깅 (강): "버그", "왜 안 돼", "원인", "근본", "디버깅", "가끔", "재현"
+- 설계, 아키텍처 (강): "설계", "아키텍처", "구조를 어떻게", "트레이드오프", "어떤 방식", "고민", "전략", "계획 세워"
 - 보안, 성능 (강): "보안", "취약", "무결성", "성능 분석"
 - 대규모 작업 (중): "전체 리팩터", "대규모", "여러 모듈", "cross-cutting"
 - 불확실성 (중): "애매", "모호", "확실하지", "잘 모르", "unclear", "ambiguous"
-- 영어: "design", "architecture", "why (does/is)", "root cause", "trade-offs", "strategy", "plan", "security", "vulnerable", "race condition", "deadlock", "intermittent", "flaky", "debug", "performance analysis", "bug", "fix"
+- 영어: "design", "architecture", "why (does/is)", "root cause", "trade-offs", "which approach", "strategy", "security", "vulnerable", "race condition", "deadlock", "intermittent", "flaky", "debug", "performance analysis", "bug"
+
+**단어가 아니라 요청 형태로 판단합니다.** 한국어는 단어 경계가 없어서 "구현된 함수 어디 있어?", "수정본 목록 보여줘"처럼 조회 질문에 섞인 단어는 신호로 치지 않습니다. 기준을 바꾼 뒤에는 `node route.test.js`로 대표 요청 13개가 기대한 모델로 가는지 확인하세요.
 - **길이 기반**: 500자 이상 또는 4개 이상 부분 요청
 
 **🟣 Fable** (초장시간 작업)

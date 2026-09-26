@@ -23,21 +23,25 @@ const ROUTES = ['haiku', 'sonnet', 'opus', 'fable'];
 // so they only count when nothing asks for real work.
 const SIGNALS = {
   haiku: [
-    [/어디(에|서)?\s*(있|정의|쓰)|검색|목록|나열|몇\s*개|확인만|번역|뭐야|알려줘/, 3],
-    [/\b(where is|search|grep|list|locate|count|translate|what does|look up)\b/i, 3],
+    [/어디(에|서)?\s*(있|정의|쓰)|검색|목록|나열|몇\s*개|확인만|번역|뭐야|알려줘|보여줘/, 3],
+    [/\b(where is|search|grep|list|locate|count|translate|what does|look up|show me)\b/i, 3],
     [/찾아|읽어|요약|분류|설명해|\b(find|read|summari[sz]e|classify|explain)\b/i, 2, 'weak'],
-    [/이름\s*바꿔|리네임|rename|포맷|format|오타|typo|주석\s*달/i, 2],
+    [/이름\s*바꿔|리네임|rename|포맷|format|오타|typo|주석\s*달/i, 3],
   ],
+  // Korean has no word boundaries, so match request forms ("구현해") and skip
+  // descriptive ones ("구현된", "수정본") that show up in lookup questions.
   sonnet: [
-    [/구현|추가해|만들어|기능|엔드포인트|컴포넌트|화면|테스트|타입\s*힌트|일괄|변환|리팩터|정리해|개선|최적화|배포/, 3],
+    [/구현(?!된|되|돼)|추가해|만들어|엔드포인트|컴포넌트|테스트\s*(작성|추가|짜|만들)|타입\s*힌트|일괄|변환해|리팩터|정리해|개선해|최적화해|배포해/, 3],
     [/\b(implement|add|build|feature|endpoint|component|update|tests?|type hints?|convert|bulk|refactor|clean ?up|improve|optimi[sz]e|deploy)\b/i, 3],
+    // Plain edits: a hint only, so "오타 수정" stays on Haiku and "버그 고쳐" goes to Opus.
+    [/수정(?!본|된|사항)|고쳐|\bfix\b/i, 1],
     // Data work: the model writes a script and the script does the math.
     [/스크립트|엑셀|시트|csv|파싱|집계|합계|계산|정산|script|excel|spreadsheet|parse|aggregate/i, 2],
   ],
   opus: [
-    [/설계|아키텍처|구조를?\s*(어떻게|잡)|트레이드오프|결정|어떤\s*방식|어떻게\s*가져갈|고민|전략|계획\s*세워|보안|취약|무결성|성능\s*분석|버그|고쳐|수정/, 4],
-    [/왜\s*(이렇|안\s*되|느려)|원인|근본|디버깅/, 4],
-    [/\b(design|architecture|why (does|is)|root cause|trade-?offs?|decide|which approach|strategy|plan|security|vulnerab|race condition|deadlock|intermittent|flaky|debug|performance analysis|bug|fix)\b/i, 4],
+    [/설계|아키텍처|구조를?\s*(어떻게|잡)|트레이드오프|어떤\s*방식|어떻게\s*가져갈|고민|전략|계획\s*세워|보안|취약|무결성|성능\s*분석|버그/, 4],
+    [/왜\s*(이렇|안\s*되|안\s*돼|느려)|원인|근본|디버깅|가끔|재현/, 4],
+    [/\b(design|architecture|why (does|is)|root cause|trade-?offs?|which approach|strategy|security|vulnerab|race condition|deadlock|intermittent|flaky|debug|performance analysis|bug)\b/i, 4],
     [/애매|모호|확실하지|잘 모르|unclear|ambiguous|not sure/i, 3],
     [/전체\s*리팩터|대규모|여러\s*모듈|cross-cutting|large refactor|whole (app|system)/i, 3],
   ],
