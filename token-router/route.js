@@ -29,15 +29,15 @@ const SIGNALS = {
     [/이름\s*바꿔|리네임|rename|포맷|format|오타|typo|주석\s*달/i, 2],
   ],
   sonnet: [
-    [/구현|추가해|만들어|고쳐|수정|버그|기능|엔드포인트|컴포넌트|화면|테스트|타입\s*힌트|일괄|변환|리팩터|정리해|개선|최적화|배포/, 2],
-    [/\b(implement|add|build|fix|bug|feature|endpoint|component|update|tests?|type hints?|convert|bulk|refactor|clean ?up|improve|optimi[sz]e|deploy)\b/i, 2],
+    [/구현|추가해|만들어|기능|엔드포인트|컴포넌트|화면|테스트|타입\s*힌트|일괄|변환|리팩터|정리해|개선|최적화|배포/, 3],
+    [/\b(implement|add|build|feature|endpoint|component|update|tests?|type hints?|convert|bulk|refactor|clean ?up|improve|optimi[sz]e|deploy)\b/i, 3],
     // Data work: the model writes a script and the script does the math.
     [/스크립트|엑셀|시트|csv|파싱|집계|합계|계산|정산|script|excel|spreadsheet|parse|aggregate/i, 2],
   ],
   opus: [
-    [/설계|아키텍처|구조를?\s*(어떻게|잡)|트레이드오프|결정|어떤\s*방식|어떻게\s*가져갈|고민|전략|계획\s*세워|보안|취약/, 4],
-    [/왜\s*(이렇|안\s*되|느려)|원인|근본/, 4],
-    [/\b(design|architecture|why (does|is)|root cause|trade-?offs?|decide|which approach|strategy|plan|security|vulnerab|race condition|deadlock|intermittent|flaky)\b/i, 4],
+    [/설계|아키텍처|구조를?\s*(어떻게|잡)|트레이드오프|결정|어떤\s*방식|어떻게\s*가져갈|고민|전략|계획\s*세워|보안|취약|무결성|성능\s*분석|버그|고쳐|수정/, 4],
+    [/왜\s*(이렇|안\s*되|느려)|원인|근본|디버깅/, 4],
+    [/\b(design|architecture|why (does|is)|root cause|trade-?offs?|decide|which approach|strategy|plan|security|vulnerab|race condition|deadlock|intermittent|flaky|debug|performance analysis|bug|fix)\b/i, 4],
     [/애매|모호|확실하지|잘 모르|unclear|ambiguous|not sure/i, 3],
     [/전체\s*리팩터|대규모|여러\s*모듈|cross-cutting|large refactor|whole (app|system)/i, 3],
   ],
@@ -61,10 +61,22 @@ function score(task) {
   if (scores.sonnet + scores.opus + scores.fable === 0) {
     for (const [route, w, word] of weak) { scores[route] += w; hits.push(`${route}:${word}`); }
   }
-  // Long, multi-part requests need judgement; very short ones rarely do.
+  // 길이 기반: Haiku 중심에서 단계적으로 Sonnet → Opus로
   const parts = task.split(/\n|그리고|또한|;|\band\b|\balso\b/i).filter((s) => s.trim().length > 8).length;
-  if (task.length > 600 || parts >= 4) { scores.opus += 3; hits.push('opus:긴/여러 요구'); }
-  if (task.length < 60 && scores.opus === 0) scores.haiku += 1;
+
+  // Sonnet 기준: 300-500자 또는 3개 부분
+  if (scores.sonnet === 0 && scores.opus === 0) {
+    if (task.length > 300 && task.length <= 500) { scores.sonnet += 2; hits.push('sonnet:중간길이'); }
+    if (parts === 3) { scores.sonnet += 1; hits.push('sonnet:여러부분'); }
+  }
+
+  // Opus 기준: 600자 이상 또는 4개 이상 부분 (내용 신호 없을 때만)
+  if (scores.opus === 0 && (scores.sonnet === 0 || scores.sonnet < 2)) {
+    if (task.length > 500) { scores.opus += 2; hits.push('opus:긴문장'); }
+    if (parts >= 4) { scores.opus += 2; hits.push('opus:복잡한요구'); }
+  }
+
+  if (task.length < 60 && scores.opus === 0 && scores.sonnet === 0) scores.haiku += 1;
   return { scores, hits };
 }
 
@@ -229,21 +241,6 @@ async function main() {
   if (args[0] === '--down') return toggle('down', args[1] !== 'off', '하향 전환 제안');
   if (args[0] === '--stats') return console.log(state.stats());
   if (args[0] === 'hook') return hook();
-  if (args[0] === 'usage') {
-    const handoff = require('./handoff');
-    const transcript = args[1] || handoff.latestTranscript();
-    if (!transcript) return console.log('토큰 사용량 측정 불가 (transcript 없음)');
-    const m = handoff.measure(transcript);
-    if (!m) return console.log('토큰 사용량 측정 실패');
-    const threshold = (state.load().threshold || 80000);
-    const loop = (state.load().loop || 200000);
-    const k = Math.round(m.context / 1000);
-    const thresholdK = Math.round(threshold / 1000);
-    const loopK = Math.round(loop / 1000);
-    const bar = m.context >= loop ? '🔴' : m.context >= threshold ? '🟡' : '🟢';
-    console.log(`${bar} 토큰: ${k}k / ${thresholdK}k(⚠️) / ${loopK}k(🔒)`);
-    return;
-  }
   if (args[0] === '--ask-at') {
     if (!['sonnet', 'opus', 'fable'].includes(args[1])) { console.error('usage: node route.js --ask-at sonnet|opus|fable'); process.exit(2); }
     const st = state.load();

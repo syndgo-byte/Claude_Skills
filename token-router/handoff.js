@@ -136,18 +136,11 @@ function toast(title, text) {
 }
 
 // Two steps. Past the warning threshold (default 80k): a notice only, work goes on. Past the
-// handoff threshold (default 200k): Claude writes the handoff, then input is locked until the
-// conversation is compacted (/compact) or cleared, so nobody keeps paying for the long context
-// without knowing it. After /compact, the SessionStart hook hands Claude the file and it goes on.
+// handoff threshold (default 200k): Claude writes the handoff and keeps going. After compaction,
+// the SessionStart hook hands Claude the file and it goes on.
 const slash = (p) => String(p || '').trim().startsWith('/');
-const isCompact = (p) => {
-  const t = String(p || '').trim();
-  return t.startsWith('/') || /^[ㄱgGcC]/.test(t);
-};
 const forceLimit = () => state.load().loopTokens || DEFAULT_LOOP;
 const snapshotCmd = (project) => `node "${path.join(__dirname, 'snapshot.js').replace(/\\/g, '/')}" "${project}"`;
-const LOCKED = (name) => `🔒 [token-router] 인수인계 완료 (${name}). 대화가 압축될 때까지 입력을 막습니다.\n`
-  + '→ /compact 를 입력하세요. 압축이 끝나면 handoff를 읽고 자동으로 이어갑니다. (/clear 후 "이어서 해줘"도 됩니다)';
 
 // What Claude must do to hand off; `then` says what happens after the file is written.
 function handoffSteps(file, context) {
@@ -157,7 +150,7 @@ function handoffSteps(file, context) {
     + ' 1) 하던 단위 작업만 마무리해 파일과 테스트를 온전한 상태로 둬라(편집 중간에 멈추지 말 것). 새 파일을 크게 읽거나 긴 출력을 내지 마라.'
     + (project ? ` 2) ${snapshotCmd(project)} 를 실행해 바뀐 파일을 백업하라.` : ' 2) 수정한 프로젝트 파일이 없으니 백업은 생략하라.')
     + ` 3) ${target} 를 token-router 스킬 양식대로 작성하라. 처리 못 한 사용자 요청은 "다음 단계" 맨 위에 적고, "미완료·주의"에 백업 경로·반쯤 된 변경·깨진 테스트·실행 중인 프로세스를 적어라.`
-    + ' 4) 작성 후 더 작업하지 마라. 훅이 입력을 잠그고 사용자에게 /compact(또는 /c, /ㄱ)를 안내한다.';
+    + ' 4) 작성 후에는 하던 작업을 이어가라. 자동 압축 후 handoff를 읽고 계속 진행한다.';
 }
 
 function hook() {
@@ -166,11 +159,7 @@ function hook() {
   const key = input.session_id || file;
   const sess = loadSession(key);
   if (slash(input.prompt)) return; // /compact, /c, /clear, /model ... pass untouched
-  if (sess.handoffWritten && isCompact(input.prompt)) return; // /c, /ㄱ, ㄱㄱ to unlock
-  if (sess.handoffWritten) {
-    console.log(JSON.stringify({ decision: 'block', reason: LOCKED(sess.handoffWritten) }));
-    return;
-  }
+  // 입력 잠금 제거: handoff 후 자동으로 진행 (lock 없이)
   const r = check(file);
   if (r.error || !r.context) return;
   const k = Math.round(r.context / 1000);
@@ -214,11 +203,11 @@ function guard() {
     sess.handoffPath = full;
     saveSession(key, sess);
     state.log({ type: 'handoff-written', file: full });
-    toast('token-router: 인수인계 완료', '/compact 를 입력하면 자동으로 이어갑니다');
+    toast('token-router: 인수인계 완료', '자동 압축 후 이어갑니다');
     console.log(JSON.stringify({
-      systemMessage: `✅ [token-router] 인수인계 파일 작성 완료: ${full}\n` + LOCKED(path.basename(full)),
+      systemMessage: `✅ [token-router] 인수인계 파일 작성 완료: ${full}`,
       hookSpecificOutput: { hookEventName: 'PostToolUse',
-        additionalContext: '[token-router] handoff 작성 완료. 더 작업하지 말고 "/compact 를 입력하면 압축 후 자동으로 이어갑니다" 한 줄만 안내하고 끝내라.' },
+        additionalContext: '[token-router] handoff 작성 완료. 사용자에게 /compact 입력을 요구하지 말고 하던 작업을 이어가라.' },
     }));
     return;
   }
